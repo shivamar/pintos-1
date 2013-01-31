@@ -11,9 +11,10 @@
 /* Struct for representing a thread that is sleeping */
 struct sleeping_thread
   {
-    struct thread * thread;
-    int64_t sleep_until_ticks;
-    struct list_elem elem;
+    struct thread * thread;  /* Pointer to the thread that is sleeping */
+    int64_t sleep_until_ticks;  /* Number of ticks since CPU 
+                                   start to sleep until */
+    struct list_elem elem;  /* List element used for traversing the list */
   };
 
 void timer_init (void);

@@ -68,7 +68,8 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem, 
+                                           &priority_less_func, NULL);
       thread_block ();
     }
   sema->value--;
@@ -112,12 +113,19 @@ sema_up (struct semaphore *sema)
 
   ASSERT (sema != NULL);
 
+  struct thread *t = NULL;
+
   old_level = intr_disable ();
-  if (!list_empty (&sema->waiters)) 
-    thread_unblock (list_entry (list_pop_front (&sema->waiters),
-                                struct thread, elem));
+  if (!list_empty (&sema->waiters)) {
+    t = list_entry (list_pop_front (&sema->waiters), struct thread, elem);
+    thread_unblock(t);
+  }    
+
   sema->value++;
   intr_set_level (old_level);
+
+  if (t != NULL && t->priority > thread_get_priority())
+        thread_yield();
 }
 
 static void sema_test_helper (void *sema_);
@@ -251,7 +259,21 @@ struct semaphore_elem
   {
     struct list_elem elem;              /* List element. */
     struct semaphore semaphore;         /* This semaphore. */
+    int sema_priority;                  /* Priority for this semaphore. */               
   };
+
+/* Uses numeric less than on priority to compare two 
+   semaphore elements of the monitor waiters list */
+static bool
+sema_less_func (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct semaphore_elem *a_sema, *b_sema;
+
+  a_sema = list_entry (a, struct semaphore_elem, elem);
+  b_sema = list_entry (b, struct semaphore_elem, elem);
+
+  return (a_sema->sema_priority > b_sema->sema_priority);
+}
 
 /* Initializes condition variable COND.  A condition variable
    allows one piece of code to signal a condition and cooperating
@@ -295,7 +317,8 @@ cond_wait (struct condition *cond, struct lock *lock)
   ASSERT (lock_held_by_current_thread (lock));
   
   sema_init (&waiter.semaphore, 0);
-  list_push_back (&cond->waiters, &waiter.elem);
+  waiter.sema_priority = thread_current ()->priority;
+  list_insert_ordered (&cond->waiters, &waiter.elem, &sema_less_func, NULL);
   lock_release (lock);
   sema_down (&waiter.semaphore);
   lock_acquire (lock);
@@ -319,6 +342,7 @@ cond_signal (struct condition *cond, struct lock *lock UNUSED)
   if (!list_empty (&cond->waiters)) 
     sema_up (&list_entry (list_pop_front (&cond->waiters),
                           struct semaphore_elem, elem)->semaphore);
+
 }
 
 /* Wakes up all threads, if any, waiting on COND (protected by

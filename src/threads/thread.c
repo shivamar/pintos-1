@@ -209,7 +209,25 @@ thread_create (const char *name, int priority,
   /* Add to run queue. */
   thread_unblock (t);
 
+  if (t->priority > thread_get_priority()) 
+    thread_yield();
+
   return tid;
+}
+
+/* Uses numeric less than on priority to compare two 
+   elements of the ready threads list */
+bool
+priority_less_func (const struct list_elem *a,
+                    const struct list_elem *b,
+                    void *aux UNUSED)
+{
+  struct thread * a_ready;
+  struct thread * b_ready;
+  a_ready = list_entry (a, struct thread, elem);
+  b_ready = list_entry (b, struct thread, elem);
+
+  return a_ready->priority > b_ready->priority;
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -245,7 +263,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered(&ready_list, &t->elem, &priority_less_func, NULL);  
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -316,7 +334,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, &priority_less_func, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -344,6 +362,14 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+
+  if (!list_empty(&ready_list))   
+  {
+    struct thread * next = list_entry (list_back (&ready_list), 
+                                       struct thread, elem);
+    if(new_priority < next->priority)
+      thread_yield ();
+  }
 }
 
 /* Returns the current thread's priority. */
@@ -560,6 +586,8 @@ thread_schedule_tail (struct thread *prev)
 static void
 schedule (void) 
 {
+  bool isEmpty = list_empty(&ready_list);
+
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;

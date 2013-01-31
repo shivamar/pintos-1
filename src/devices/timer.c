@@ -233,11 +233,13 @@ timer_interrupt (struct intr_frame *args UNUSED)
       if (current_item->sleep_until_ticks <= ticks)
         {
           thread_unblock (current_item->thread);
-          list_push_front (&pointers_to_free, current_elem);
+          list_insert_ordered (&pointers_to_free, current_elem, 
+                               &priority_less_func, NULL);
         }
       else
        {
-         list_push_front (&sleeping_threads_list, current_elem);
+         list_insert_ordered (&sleeping_threads_list, current_elem, 
+                              &priority_less_func, NULL);
          break;
        }
     }
