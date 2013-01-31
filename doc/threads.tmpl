@@ -9,8 +9,9 @@
 >> Fill in the names and email addresses of your group members.
 
 FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+Irina-Elena Veliche <irina-elena.veliche11@imperial.ac.uk>
+Paul Rowe-White <paul.rowe-white11@imperial.ac.uk>
+Andrei Bogdan Antonescu <andrei.antonescu11@imperial.ac.uk>
 
 ---- PRELIMINARIES ----
 
@@ -29,6 +30,28 @@ FirstName LastName <email@domain.example>
 >> A1: Copy here the declaration of each new or changed `struct' or
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
+
+The sleeping thread struct is used to record sleeping threads so that they 
+can be blocked until the time they want to be woken. 
+/* Struct for representing a thread that is sleeping */
+struct sleeping_thread
+  {
+    struct thread * thread;  /* Pointer to the thread that is sleeping */
+    int64_t sleep_until_ticks;  /* Number of ticks since CPU 
+                                   start to sleep until */
+    struct list_elem elem;  /* List element used for traversing the list */
+  };
+
+This is the list of sleeping threads, ordered by the time to be woken at in 
+ascending order.
+/* List of sleeping threads */
+struct list sleeping_threads_list;
+
+This is the list of sleeping thread structs of threads that have been woken
+so the memory of the list element can be recovered.
+/* List of pointers to memory that needs to be freed */
+struct list pointers_to_free;
+
 
 ---- ALGORITHMS ----
 
