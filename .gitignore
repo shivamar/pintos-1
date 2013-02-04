@@ -1,4 +1,5 @@
 **/build
+.*.swp
 bochsrc.txt
 bochsout.txt
 spec
