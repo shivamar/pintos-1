@@ -227,7 +227,7 @@ priority_less_func (const struct list_elem *a,
   a_ready = list_entry (a, struct thread, elem);
   b_ready = list_entry (b, struct thread, elem);
 
-  return a_ready->priority > b_ready->priority;
+  return a_ready->priority < b_ready->priority;
 }
 
 /* Puts the current thread to sleep.  It will not be scheduled
@@ -263,7 +263,7 @@ thread_unblock (struct thread *t)
 
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered(&ready_list, &t->elem, &priority_less_func, NULL);  
+  list_push_back(&ready_list, &t->elem);  
   t->status = THREAD_READY;
   intr_set_level (old_level);
 }
@@ -334,7 +334,7 @@ thread_yield (void)
 
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, &priority_less_func, NULL);
+    list_push_back (&ready_list, &cur->elem);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -527,7 +527,8 @@ next_thread_to_run (void)
   if (list_empty (&ready_list))
     return idle_thread;
   else
-    return list_entry (list_pop_front (&ready_list), struct thread, elem);
+    return list_entry (list_remove_ordered (&ready_list, 
+        &priority_less_func, NULL), struct thread, elem);
 }
 
 /* Completes a thread switch by activating the new thread's page
@@ -586,8 +587,6 @@ thread_schedule_tail (struct thread *prev)
 static void
 schedule (void) 
 {
-  bool isEmpty = list_empty(&ready_list);
-
   struct thread *cur = running_thread ();
   struct thread *next = next_thread_to_run ();
   struct thread *prev = NULL;

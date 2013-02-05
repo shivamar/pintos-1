@@ -20,10 +20,10 @@ tests_name[3] = "Priority Donation"
 tests_name[4] = "MLFQS Scheduler"
 
 tests = {}
-tests[1] = ["alarm-negative.result", "alarm-simultaneous.result", "alarm-wait.result", "alarm-zero.result"]
-tests[2] = ["priority-change.result", "priority-condvar.result", "priority-fifo.result", "priority-preempt.result", "priority-sema.result", "alarm-priority.result"]
-tests[3] = ["priority-donate-chain.result", "priority-donate-lower.result", "priority-donate-multiple.result", "priority-donate-multiple2.result", "priority-donate-nest.result", "priority-donate-one.result", "priority-donate-sema.result"]
-tests[4] = ["mlfqs-block.result", "mlfqs-fair.result", "mlfqs-load-1.result", "mlfqs-load-60.result", "mlfqs-load-avg.result", "mlfqs-recent-1.result"]
+tests[1] = ["alarm-negative", "alarm-simultaneous", "alarm-wait", "alarm-zero"]
+tests[2] = ["priority-change", "priority-condvar", "priority-fifo", "priority-preempt", "priority-sema", "alarm-priority"]
+tests[3] = ["priority-donate-chain", "priority-donate-lower", "priority-donate-multiple", "priority-donate-multiple2", "priority-donate-nest", "priority-donate-one", "priority-donate-sema"]
+tests[4] = ["mlfqs-block", "mlfqs-fair", "mlfqs-load-1", "mlfqs-load-60", "mlfqs-load-avg", "mlfqs-recent-1"]
 
 # path to tests
 path = 'build/tests/threads/'
@@ -41,29 +41,35 @@ def make():
     output = run_process("make all")
 
     if 'error' in output or 'Error' in output:
+        print output
         print color_red + 'Errors encountered in compilation. Will now Stop!' + color_end
         exit()
 
     if 'warning' in output or 'Warning' in output:
+        print output
         print color_red + 'Warnings encountered in compilation.' + color_end
 
-def grade(output, test_name):
-    test_name = test_name.rsplit('.result', 1)[0]
+def grade(output, test_name, debug):
     ofset = ' ' * (65 - len(test_name))
     if 'pass' in output:
         print 'Test ' + test_name +  ofset + color_green + ' Passed!' + color_end
         return 1
     print 'Test ' + test_name + ofset + color_red + ' Failed!' + color_end
+
+    if debug is True:
+        print output
+        exit()
+
     return 0
 
 # run tests
-def test(tests, name):
+def test(tests, name, debug):
     count = 0
     print ''
     for test_name in tests:
-        run_process("rm " + path + test_name)
-        output = run_process("make " + path + test_name)
-        count += grade(output, test_name)
+        run_process("rm " + path + test_name + ".result")
+        output = run_process("make " + path + test_name + ".result")
+        count += grade(output, test_name, debug)
     print '_' * 80
     if count == len(tests):
         print color_white + 'Passed ALL ' + name + ' Tests' + color_end
@@ -93,9 +99,15 @@ def is_number(s):
         return False
 
 if __name__ == '__main__':
+    debug = False
+
     for i in range(0, len(args)):
         if args[i] == 'help':
             help()
+            continue
+
+        if args[i] == '-d' or args[i] == '-v':
+            debug = True
             continue
 
         if args[i] == 'make':
@@ -115,12 +127,12 @@ if __name__ == '__main__':
             continue
 
         if int(args[i]) is 1:
-            test(tests[1], tests_name[1])
+            test(tests[1], tests_name[1], debug)
         elif int(args[i]) is 2:
-            test(tests[2], tests_name[2])
+            test(tests[2], tests_name[2], debug)
         elif int(args[i]) is 3:
-            test(tests[3], tests_name[3])
+            test(tests[3], tests_name[3], debug)
         elif int(args[i]) is 4:
-            test(tests[4], tests_name[4])
+            test(tests[4], tests_name[4], debug)
     print ''
 

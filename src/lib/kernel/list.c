@@ -458,6 +458,19 @@ list_insert_ordered (struct list *list, struct list_elem *elem,
   return list_insert (e, elem);
 }
 
+/* Removes lowest ELEM from LIST compared according to LESS given auxilay
+   data AUX. Runs in O(n) average case in the number of elements in LIST. */
+struct list_elem *
+list_remove_ordered(struct list *list, list_less_func *less, void *aux)
+{
+    ASSERT (list != NULL);
+    ASSERT (less != NULL);
+   
+    struct list_elem *elem = list_max (list, less, aux);
+    list_remove (elem);
+    return elem;            
+}
+
 /* Iterates through LIST and removes all but the first in each
    set of adjacent elements that are equal according to LESS
    given auxiliary data AUX.  If DUPLICATES is non-null, then the

@@ -107,7 +107,8 @@ timer_sleep (int64_t ticks)
 
   while (!list_empty (&pointers_to_free))
     {
-      struct list_elem *front = list_pop_front (&pointers_to_free);
+      struct list_elem *front = list_remove_ordered (&pointers_to_free, 
+                                                   &ticks_less_func, NULL);
       struct sleeping_thread *to_free = list_entry (front, 
                                                     struct sleeping_thread,
                                                     elem);
@@ -122,8 +123,7 @@ timer_sleep (int64_t ticks)
 
   current_thread->thread = thread_current();
   current_thread->sleep_until_ticks = start + ticks;
-  list_insert_ordered (&sleeping_threads_list, &(current_thread->elem), 
-                       &ticks_less_func, NULL);
+  list_push_back (&sleeping_threads_list, &(current_thread->elem) );
 
   enum intr_level old_level = intr_disable ();
   thread_block ();
@@ -227,19 +227,18 @@ timer_interrupt (struct intr_frame *args UNUSED)
   enum intr_level old_level = intr_disable ();
   while (!list_empty (&sleeping_threads_list))
     {
-      current_elem = list_pop_front (&sleeping_threads_list);
+      current_elem = list_remove_ordered (&sleeping_threads_list, 
+                                          &priority_less_func, NULL);
       current_item = list_entry (current_elem, struct sleeping_thread, elem);
       
       if (current_item->sleep_until_ticks <= ticks)
         {
           thread_unblock (current_item->thread);
-          list_insert_ordered (&pointers_to_free, current_elem, 
-                               &priority_less_func, NULL);
+          list_push_back (&pointers_to_free, current_elem);
         }
       else
        {
-         list_insert_ordered (&sleeping_threads_list, current_elem, 
-                              &priority_less_func, NULL);
+         list_push_back (&sleeping_threads_list, current_elem);
          break;
        }
     }
