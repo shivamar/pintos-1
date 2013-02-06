@@ -222,8 +222,7 @@ priority_less_func (const struct list_elem *a,
                     const struct list_elem *b,
                     void *aux UNUSED)
 {
-  struct thread * a_ready;
-  struct thread * b_ready;
+  struct thread *a_ready, *b_ready;
   a_ready = list_entry (a, struct thread, elem);
   b_ready = list_entry (b, struct thread, elem);
 
@@ -358,16 +357,33 @@ thread_foreach (thread_action_func *func, void *aux)
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void
+void 
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+    thread_set_priority_extra (thread_current (), new_priority, true);
+}
 
-  if (!list_empty(&ready_list))   
+void
+thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
+{
+  if (!curr->donated)
+    curr->priority = curr->base_priority = new_priority;
+  else if (force)
+    {
+        if (curr->priority > new_priority)
+          curr->base_priority = new_priority;
+        else
+          curr->priority = new_priority;
+    }
+  else
+    curr->priority = new_priority;
+
+  if (curr->status == THREAD_RUNNING && !list_empty(&ready_list))   
   {
-    struct thread * next = list_entry (list_back (&ready_list), 
-                                       struct thread, elem);
-    if(new_priority < next->priority)
+    struct thread * next = list_entry (list_max (&ready_list, 
+            &priority_less_func, NULL), struct thread, elem);
+
+    if(curr->priority < next->priority)
       thread_yield ();
   }
 }
@@ -495,7 +511,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+  
+  t->priority = t->base_priority = priority;
+  t->donated = false;
+  t->blocked = NULL;
+  list_init (&t->locks);
+
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
