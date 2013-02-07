@@ -380,7 +380,6 @@ thread_set_priority (int new_priority)
 {
     thread_set_priority_extra (thread_current (), new_priority, true);
 }
-<<<<<<< HEAD
 
 void
 thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
@@ -397,24 +396,6 @@ thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
   else
     curr->priority = new_priority;
 
-=======
-
-void
-thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
-{
-  if (!curr->donated)
-    curr->priority = curr->base_priority = new_priority;
-  else if (force)
-    {
-        if (curr->priority > new_priority)
-          curr->base_priority = new_priority;
-        else
-          curr->priority = new_priority;
-    }
-  else
-    curr->priority = new_priority;
-
->>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
   if (curr->status == THREAD_RUNNING && !list_empty(&ready_list))   
   {
     struct thread * next = list_entry (list_max (&ready_list, 
@@ -629,14 +610,6 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   
-<<<<<<< HEAD
-=======
-  t->priority = t->base_priority = priority;
-  t->donated = false;
-  t->blocked = NULL;
-  list_init (&t->locks);
-
->>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
   t->magic = THREAD_MAGIC;
 
   /* Calculate the thread priority if mlfqs is being used,
