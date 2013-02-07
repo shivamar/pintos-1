@@ -101,6 +101,7 @@ struct thread
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
 
+<<<<<<< HEAD
     int base_priority;                  /* Base priority of a thread. */ 
     bool donated;                       /* If a thread has donated priority. */
     struct list locks;                  /* List of locks hold by a thread */
@@ -108,6 +109,12 @@ struct thread
 
     int nice;                           /* Nice value */
     int32_t recent_cpu;                 /* Recent CPU value */
+=======
+    int base_priority;
+    bool donated;
+    struct list locks;
+    struct lock *blocked;
+>>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

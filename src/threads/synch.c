@@ -229,6 +229,7 @@ lock_acquire (struct lock *lock)
   thread = lock->holder;
   curr->blocked = max_lock = lock;
 
+<<<<<<< HEAD
   if (!thread_mlfqs) 
   {
     while (thread != NULL && thread->priority < curr->priority) 
@@ -246,13 +247,33 @@ lock_acquire (struct lock *lock)
           break;        
       }
   } 
+=======
+  while (thread != NULL && thread->priority < curr->priority) 
+    {
+      thread->donated = true;
+      thread_set_priority_extra (thread, curr->priority, false);
+      if (max_lock->lock_priority < curr->priority)
+        max_lock->lock_priority = curr->priority;
+      if (thread->status == THREAD_BLOCKED && thread->blocked != NULL)
+        {
+          max_lock = thread->blocked;
+          thread = thread->blocked->holder;
+        }
+      else
+        break;        
+    } 
+>>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
 
   sema_down (&lock->semaphore);
   lock->holder = curr;
   curr->blocked = NULL;
+<<<<<<< HEAD
   
   if (!thread_mlfqs) 
     list_push_back(&lock->holder->locks, &lock->lock_elem);   
+=======
+  list_push_back(&lock->holder->locks, &lock->lock_elem);   
+>>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
   intr_set_level(old_level); 
 }
 
@@ -274,8 +295,12 @@ lock_try_acquire (struct lock *lock)
   if (success) 
     {
       lock->holder = thread_current ();
+<<<<<<< HEAD
       if (!thread_mlfqs)
         list_push_back (&lock->holder->locks, &lock->lock_elem);
+=======
+      list_push_back (&lock->holder->locks, &lock->lock_elem);
+>>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
     }
   return success;
 }
@@ -302,6 +327,7 @@ lock_release (struct lock *lock)
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 
+<<<<<<< HEAD
   if (!thread_mlfqs) 
   {
     list_remove (&lock->lock_elem);
@@ -322,6 +348,24 @@ lock_release (struct lock *lock)
           thread_set_priority (curr->base_priority);
       }
   }  
+=======
+  list_remove (&lock->lock_elem);
+  lock->lock_priority = PRI_MIN - 1;
+  if (list_empty(&curr->locks)) 
+    {
+      curr->donated = false;
+      thread_set_priority (curr->base_priority);
+    }
+  else 
+    {
+      elem = list_max (&curr->locks, &lock_less_func, NULL);
+      max_lock = list_entry (elem, struct lock, lock_elem);
+      if (max_lock->lock_priority != PRI_MIN - 1)
+        thread_set_priority_extra (curr, max_lock->lock_priority, false);
+      else
+        thread_set_priority (curr->base_priority);
+    }  
+>>>>>>> f632b1e1de37074246a25b6784a2dfb8bb826863
 
   intr_set_level (old_level);
 }
