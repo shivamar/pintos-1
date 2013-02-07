@@ -20,10 +20,10 @@ tests_name[3] = "Priority Donation"
 tests_name[4] = "MLFQS Scheduler"
 
 tests = {}
-tests[1] = ["alarm-negative", "alarm-simultaneous", "alarm-wait", "alarm-zero"]
+tests[1] = ["alarm-negative", "alarm-simultaneous", "alarm-zero"] # "alarm-wait"
 tests[2] = ["priority-change", "priority-condvar", "priority-fifo", "priority-preempt", "priority-sema", "alarm-priority"]
 tests[3] = ["priority-donate-chain", "priority-donate-lower", "priority-donate-multiple", "priority-donate-multiple2", "priority-donate-nest", "priority-donate-one", "priority-donate-sema"]
-tests[4] = ["mlfqs-block", "mlfqs-fair", "mlfqs-load-1", "mlfqs-load-60", "mlfqs-load-avg", "mlfqs-recent-1"]
+tests[4] = ["mlfqs-block", "mlfqs-fair-2", "mlfqs-fair-20", "mlfqs-nice-10", "mlfqs-nice-2", "mlfqs-load-1", "mlfqs-load-60", "mlfqs-load-avg", "mlfqs-recent-1"]
 
 # path to tests
 path = 'build/tests/threads/'
@@ -106,7 +106,7 @@ if __name__ == '__main__':
             help()
             continue
 
-        if args[i] == '-d' or args[i] == '-v':
+        if args[i] == 'd' or args[i] == 'v' or args[i] == 'verbose' or args[i] == 'debug':
             debug = True
             continue
 

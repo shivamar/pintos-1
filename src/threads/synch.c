@@ -164,6 +164,20 @@ sema_test_helper (void *sema_)
       sema_up (&sema[1]);
     }
 }
+
+/* Uses numeric less than on priority to compare two
+   locks elements of the thread locks list */
+static bool
+lock_less_func (const struct list_elem *a, const struct list_elem *b, void *aux UNUSED)
+{
+  struct lock *a_lock, *b_lock;
+
+  a_lock = list_entry (a, struct lock, lock_elem);
+  b_lock = list_entry (b, struct lock, lock_elem);
+
+  return (a_lock->lock_priority < b_lock->lock_priority);
+}
+
 
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
@@ -186,6 +200,7 @@ lock_init (struct lock *lock)
   ASSERT (lock != NULL);
 
   lock->holder = NULL;
+  lock->lock_priority = PRI_MIN - 1;
   sema_init (&lock->semaphore, 1);
 }
 
@@ -203,9 +218,42 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
+  
+  enum intr_level old_level;
+
+  old_level = intr_disable ();
+  struct thread *curr, *thread;
+  struct lock *max_lock;
+
+  curr = thread_current();
+  thread = lock->holder;
+  curr->blocked = max_lock = lock;
+
+  if (!thread_mlfqs) 
+  {
+    while (thread != NULL && thread->priority < curr->priority) 
+      {
+        thread->donated = true;
+        thread_set_priority_extra (thread, curr->priority, false);
+        if (max_lock->lock_priority < curr->priority)
+          max_lock->lock_priority = curr->priority;
+        if (thread->status == THREAD_BLOCKED && thread->blocked != NULL)
+          {
+            max_lock = thread->blocked;
+            thread = thread->blocked->holder;
+          }
+        else
+          break;        
+      }
+  } 
 
   sema_down (&lock->semaphore);
-  lock->holder = thread_current ();
+  lock->holder = curr;
+  curr->blocked = NULL;
+  
+  if (!thread_mlfqs) 
+    list_push_back(&lock->holder->locks, &lock->lock_elem);   
+  intr_set_level(old_level); 
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -223,8 +271,12 @@ lock_try_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   success = sema_try_down (&lock->semaphore);
-  if (success)
-    lock->holder = thread_current ();
+  if (success) 
+    {
+      lock->holder = thread_current ();
+      if (!thread_mlfqs)
+        list_push_back (&lock->holder->locks, &lock->lock_elem);
+    }
   return success;
 }
 
@@ -236,11 +288,42 @@ lock_try_acquire (struct lock *lock)
 void
 lock_release (struct lock *lock) 
 {
-  ASSERT (lock != NULL);
+  ASSERT (lock != NULL);    
   ASSERT (lock_held_by_current_thread (lock));
+  
+  struct thread *curr;
+  struct list_elem *elem;
+  struct lock* max_lock;  
+  enum intr_level old_level;
+
+  old_level = intr_disable();
+  curr = thread_current ();
 
   lock->holder = NULL;
   sema_up (&lock->semaphore);
+
+  if (!thread_mlfqs) 
+  {
+    list_remove (&lock->lock_elem);
+    lock->lock_priority = PRI_MIN - 1;
+
+    if (list_empty(&curr->locks)) 
+      {
+        curr->donated = false;
+        thread_set_priority (curr->base_priority);
+      }
+    else 
+      {
+        elem = list_max (&curr->locks, &lock_less_func, NULL);
+        max_lock = list_entry (elem, struct lock, lock_elem);
+        if (max_lock->lock_priority != PRI_MIN - 1)
+          thread_set_priority_extra (curr, max_lock->lock_priority, false);
+        else
+          thread_set_priority (curr->base_priority);
+      }
+  }  
+
+  intr_set_level (old_level);
 }
 
 /* Returns true if the current thread holds LOCK, false

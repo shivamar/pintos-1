@@ -14,6 +14,7 @@
 #ifdef USERPROG
 #include "userprog/process.h"
 #endif
+#include "threads/fixed-point.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -59,6 +60,9 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
+/* Load average for the system */
+int32_t load_avg;
+
 static void kernel_thread (thread_func *, void *aux);
 
 static void idle (void *aux UNUSED);
@@ -70,6 +74,7 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static void thread_calculate_priority (struct thread *t, void *aux UNUSED);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -134,9 +139,22 @@ thread_tick (void)
   else
     kernel_ticks++;
 
+  /* Incrent the current thread's recent cpu value if mlfqs is being used. */
+  if (thread_mlfqs && thread_current () != idle_thread)
+    {
+      t->recent_cpu = fixed_point_add_int (t->recent_cpu, 1);
+    }
+
   /* Enforce preemption. */
   if (++thread_ticks >= TIME_SLICE)
+  {
+    /* Re-calculate priorities for all threads if mlfqs is being used. */
+    if (thread_mlfqs)
+      {
+        thread_foreach (&thread_calculate_priority, NULL);
+      }
     intr_yield_on_return ();
+  }
 }
 
 /* Prints thread statistics. */
@@ -222,8 +240,7 @@ priority_less_func (const struct list_elem *a,
                     const struct list_elem *b,
                     void *aux UNUSED)
 {
-  struct thread * a_ready;
-  struct thread * b_ready;
+  struct thread *a_ready, *b_ready;
   a_ready = list_entry (a, struct thread, elem);
   b_ready = list_entry (b, struct thread, elem);
 
@@ -358,58 +375,155 @@ thread_foreach (thread_action_func *func, void *aux)
 }
 
 /* Sets the current thread's priority to NEW_PRIORITY. */
-void
+void 
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
+    thread_set_priority_extra (thread_current (), new_priority, true);
+}
 
-  if (!list_empty(&ready_list))   
+void
+thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
+{
+  if (!curr->donated)
+    curr->priority = curr->base_priority = new_priority;
+  else if (force)
+    {
+        if (curr->priority > new_priority)
+          curr->base_priority = new_priority;
+        else
+          curr->priority = new_priority;
+    }
+  else
+    curr->priority = new_priority;
+
+  if (curr->status == THREAD_RUNNING && !list_empty(&ready_list))   
   {
-    struct thread * next = list_entry (list_back (&ready_list), 
-                                       struct thread, elem);
-    if(new_priority < next->priority)
+    struct thread * next = list_entry (list_max (&ready_list, 
+            &priority_less_func, NULL), struct thread, elem);
+
+    if(curr->priority < next->priority)
       thread_yield ();
   }
 }
 
 /* Returns the current thread's priority. */
 int
-thread_get_priority (void) 
+thread_get_priority (void)
 {
   return thread_current ()->priority;
 }
 
+/* Calculates and sets the priority of thread t for the BSD Scheduler */
+void
+thread_calculate_priority (struct thread *t, void *aux UNUSED)
+{
+  ASSERT (thread_mlfqs);
+  int32_t fp_priority = int_to_fixed_point (PRI_MAX);
+  int32_t recent_cpu = fixed_point_divide_int (t->recent_cpu, 4);
+  fp_priority = fixed_point_subtract_fixed_point (fp_priority, recent_cpu);
+  fp_priority = fixed_point_subtract_fixed_point (fp_priority,
+                                                  int_to_fixed_point(t->nice * 2));
+  int int_priority = fixed_point_to_int_round_to_zero (fp_priority);
+  if (int_priority > PRI_MAX)
+    {
+      int_priority = PRI_MAX;
+    }
+
+  if (int_priority < PRI_MIN)
+    {
+      int_priority = PRI_MIN;
+    }
+  t->priority = int_priority;
+}
+
+/* Calculates and sets the recent cpu usage for thread t. */
+void
+thread_calculate_recent_cpu (struct thread *t, void *aux UNUSED)
+{
+  int32_t recent_cpu = t->recent_cpu;
+  int32_t current_load_avg = load_avg;
+  int32_t coeff;
+  current_load_avg = fixed_point_multiply_int (current_load_avg, 2);
+  coeff = fixed_point_divide_fixed_point (current_load_avg,
+                                          fixed_point_add_int (current_load_avg,
+                                                               1));
+  recent_cpu = fixed_point_multiply_fixed_point (coeff, recent_cpu);
+  recent_cpu = fixed_point_add_int (recent_cpu, t->nice);
+  t->recent_cpu = recent_cpu;
+}
+
 /* Sets the current thread's nice value to NICE. */
 void
-thread_set_nice (int nice UNUSED) 
+thread_set_nice (int nice)
 {
-  /* Not yet implemented. */
+  ASSERT (thread_mlfqs);
+  ASSERT (nice >= NICE_MIN);
+  ASSERT (nice <= NICE_MAX);
+  thread_current ()->nice = nice;
+  thread_calculate_priority(thread_current (), NULL);
+
+  if (!list_empty(&ready_list))
+  {
+    struct thread * next = list_entry (list_max (&ready_list,
+                                       &priority_less_func, NULL),
+                                       struct thread, elem);
+    if(thread_current ()->priority < next->priority)
+      thread_yield ();
+  }
 }
 
 /* Returns the current thread's nice value. */
 int
-thread_get_nice (void) 
+thread_get_nice (void)
 {
-  /* Not yet implemented. */
-  return 0;
+  ASSERT (thread_mlfqs);
+  return thread_current ()->nice;
 }
 
 /* Returns 100 times the system load average. */
 int
-thread_get_load_avg (void) 
+thread_get_load_avg (void)
 {
-  /* Not yet implemented. */
-  return 0;
+
+  int32_t current_load_avg = load_avg;
+  int rounded_load_avg;
+  current_load_avg = fixed_point_multiply_int (current_load_avg, 100);
+  rounded_load_avg = fixed_point_to_int_round_nearest (current_load_avg);
+  return rounded_load_avg;
+}
+
+/* Calculates and sets the current system load average */
+void
+thread_calculate_load_avg (void)
+{
+  int32_t load_avg_coeff = int_to_fixed_point (59);
+  load_avg_coeff = fixed_point_divide_int (load_avg_coeff, 60);
+  int32_t ready_thread_coeff = int_to_fixed_point (1);
+  ready_thread_coeff = fixed_point_divide_int (ready_thread_coeff, 60);
+  int ready_threads = list_size (&ready_list);
+  if (thread_current () != idle_thread)
+    ready_threads++;
+
+  load_avg_coeff = fixed_point_multiply_fixed_point (load_avg_coeff,
+                                                     load_avg);
+  ready_thread_coeff = fixed_point_multiply_int (ready_thread_coeff,
+                                                         ready_threads);
+
+  load_avg = fixed_point_add_fixed_point (load_avg_coeff,
+                                          ready_thread_coeff);
 }
 
 /* Returns 100 times the current thread's recent_cpu value. */
 int
-thread_get_recent_cpu (void) 
+thread_get_recent_cpu (void)
 {
-  /* Not yet implemented. */
-  return 0;
+  int32_t recent_cpu = thread_current ()->recent_cpu;
+  int rounded_cpu;
+  recent_cpu = fixed_point_multiply_int (recent_cpu, 100);
+  rounded_cpu = fixed_point_to_int_round_nearest (recent_cpu);
+  return rounded_cpu;
 }
-
+
 /* Idle thread.  Executes when no other thread is ready to run.
 
    The idle thread is initially put on the ready list by
@@ -495,8 +609,22 @@ init_thread (struct thread *t, const char *name, int priority)
   t->status = THREAD_BLOCKED;
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
-  t->priority = priority;
+  
   t->magic = THREAD_MAGIC;
+
+  /* Calculate the thread priority if mlfqs is being used,
+     otherwise used the value passed in. */
+  if (thread_mlfqs)
+    {
+      thread_calculate_priority (t, NULL);
+    }
+  else
+    {
+      t->priority = t->base_priority = priority;
+      t->donated = false;
+      t->blocked = NULL;
+      list_init (&t->locks);
+    }
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);

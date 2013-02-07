@@ -105,10 +105,11 @@ timer_sleep (int64_t ticks)
 
   ASSERT (intr_get_level () == INTR_ON);
 
+  enum intr_level old_level = intr_disable ();
+
   while (!list_empty (&pointers_to_free))
     {
-      struct list_elem *front = list_remove_ordered (&pointers_to_free, 
-                                                   &ticks_less_func, NULL);
+      struct list_elem *front = list_pop_front (&pointers_to_free);
       struct sleeping_thread *to_free = list_entry (front, 
                                                     struct sleeping_thread,
                                                     elem);
@@ -116,16 +117,11 @@ timer_sleep (int64_t ticks)
     }
 
   current_thread = malloc (sizeof (struct sleeping_thread));
-  if (current_thread == NULL) 
-    {
-      printf ("Call to malloc returned NULL");
-    }
-
+  ASSERT (current_thread != NULL);  
   current_thread->thread = thread_current();
   current_thread->sleep_until_ticks = start + ticks;
-  list_push_back (&sleeping_threads_list, &(current_thread->elem) );
-
-  enum intr_level old_level = intr_disable ();
+  list_insert_ordered (&sleeping_threads_list, &current_thread->elem, 
+                       &ticks_less_func, NULL);
   thread_block ();
   intr_set_level (old_level);  
 }
@@ -223,22 +219,29 @@ timer_interrupt (struct intr_frame *args UNUSED)
   thread_tick ();
   struct list_elem * current_elem;
   struct sleeping_thread * current_item;
-
+  
   enum intr_level old_level = intr_disable ();
+  
+  /* Update recent cpu and load avg every second */
+  if (thread_mlfqs && timer_ticks () % TIMER_FREQ == 0)
+    {
+      thread_calculate_load_avg ();
+      thread_foreach (&thread_calculate_recent_cpu, NULL);
+    }
+
   while (!list_empty (&sleeping_threads_list))
     {
-      current_elem = list_remove_ordered (&sleeping_threads_list, 
-                                          &priority_less_func, NULL);
+      current_elem = list_pop_front (&sleeping_threads_list);  
       current_item = list_entry (current_elem, struct sleeping_thread, elem);
       
       if (current_item->sleep_until_ticks <= ticks)
         {
           thread_unblock (current_item->thread);
-          list_push_back (&pointers_to_free, current_elem);
+          list_push_front (&pointers_to_free, current_elem);
         }
       else
        {
-         list_push_back (&sleeping_threads_list, current_elem);
+         list_push_front (&sleeping_threads_list, current_elem);
          break;
        }
     }
