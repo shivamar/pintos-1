@@ -83,20 +83,98 @@ struct list pointers_to_free;
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+In struct thread from thread.h we added some other fields to a thread in 
+order to be able to make the priority donation work.
+
+/* Thread */
+struct thread 
+  {
+    ...
+
+	int base_priority;      /* Base priority of a thread. */
+	bool donated;           /* If a thread has donated priority. */
+	struct list locks;      /* List of locks hold by a thread */ 
+	struct list *blocked;   /* The lock blocking the thread */
+
+    ...
+  }
+
+Thus, we have a base_priority field, where we keep the priority of each thread
+before it receives any donations. If no donations are received, it should have
+the same priority.
+We also keep a bool donated, that is false initially and becomes true if the 
+thread receives a priority donation.
+The struct list locks keeps the list of locks held by a thread, and in the 
+blocked field we keep the lock blocking the thread if any. 
+
+In synch.h we added some new fields to the struct of lock, to facilitate the 
+priority donation.
+
+/* Lock. */
+struct lock
+  {
+    struct thread *holder;      /* Thread holding lock (for debugging). */
+    struct list_elem lock_elem; /* List elem of lock from structure thread */
+    struct semaphore semaphore; /* Binary semaphore controlling access. */
+    int lock_priority;          /* The highest priority waiting for the lock. */
+  };
+
+
+In lock_elem we keep the list element of lock from the structure thread, while
+we chose to have a field lock_priority to keep the highest priority waiting
+for the lock.
+
 >> B2: Explain the data structure used to track priority donation.
 >> Use ASCII art to diagram a nested donation.  (Alternately, submit a
 >> .png file.)
+
+In order to track priority donation we used a list from which we extract the 
+element with the highest priority from the list of waiters in a semaphore.
+The list_remove_ordered function removes the lowest element from the list 
+according to the priority based comparation given by the list_less_func
+funcion declared in synch.c.
+We also had to handle nested donation. Consider we have three threads,
+H, M and L, with priorities high, medium and low. If H is waiting on a lock
+that M holds and M is waiting on a lock that L holds, then both M and L should
+be boosted to H's priority. 
+
+Here is a .png drawing of this case: https://www.doc.ic.ac.uk/~aba111/donate.png
 
 ---- ALGORITHMS ----
 
 >> B3: How do you ensure that the highest priority thread waiting for
 >> a lock, semaphore, or condition variable wakes up first?
 
+We wrote a function in list.c that removes from a given list the max
+element according to a provided less than function. Our function compares
+the threads based on their priority so we will always add to the ready 
+list the one with the biggest priority. Alternatively we considered 
+replacing all the push_back calls with insert_ordered so maintaining
+the queues ordered based on priority, but this would require to sort 
+the queue each time we set a thread priority. Our solution has the 
+advantage of a liner complexity with the number of threads as worst case.
+
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
 
+When we try to aquire a lock we check if that lock is hold by another thread
+and if this is the case we donate the current thread's priority to the thread
+holder. Nested donation could occur if the lock holder is also blocked by 
+another thread holding a lock he is trying to aquire. In this case we will
+donate priority to all the threads in such a chain. We didn't impose any 
+limit to priority donation because the threads list is usually quite small
+and in practice nested donations are even smaller. 
+
 >> B5: Describe the sequence of events when lock_release() is called
 >> on a lock that a higher-priority thread is waiting for.
+
+When a thread releases a lock we will set its priority either to the default
+priority (before acquiring the lock) or to the max priority of the other threads
+waiting for locks held by it. We do this by taking the max lock when compared
+to priority from a thread's locks list. After we set a priority we check to see 
+if there is another thread in the ready list with a higher priority and yield 
+the cpu is needed. This is why if when lock_release() is called on a thread
+it will immediately run the highest priority thread that was waiting for it.  
 
 ---- SYNCHRONIZATION ----
 
@@ -104,10 +182,45 @@ struct list pointers_to_free;
 >> how your implementation avoids it.  Can you use a lock to avoid
 >> this race?
 
+A race condition could arise in various situations. For instance, a race 
+condition could occur when multiple threads are attempting to set priority 
+at the same time or when a thread would be blocked by the scheduler while
+changing its priority. The second could make a lower priority thread run
+although the current thread was receving priority donation. To avoid a 
+race conditions, we disabled interrupts for the duration of the function 
+that updates the priorities.
+
+Alternatively, we considered using a lock to prevent the scheduler from 
+changing threads while a thread is in the critical section of the 
+set_priority but I think disabling interrupts is a more clear solution.
+
+We tried to test without disabling interrupts and all the test cases pass,
+several times. So this case is similar to a heisenbug, so at least in theory 
+I think it's a better solution.
+
 ---- RATIONALE ----
 
 >> B7: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+For strict priority scheduling we decided to change all the calls to push_back
+to insert_orderd so we run the threads based on their priority. When adding
+priority donation we changed our design as explanined on question B3.
+
+For priority donation our original approach was to write the code in the 
+sema_down and sema_up function as locks in pintos are implemented using 
+semaphores. After further review of the design, we realized this was 
+over-complicating the problem as we only needed priority donation for 
+locks. Another possible approach is to put the logic for priority donation
+in the thread struct, and handle things from there. This was a bit of overhead
+and required a lot of changes in diffrent parts of the code. 
+
+Finally, we decided to write all functionality in lock_aquire and lock_relase.
+This has the advantage that it is all in one place so it's easy to change
+when we use the advanced scheduler. We handled nested donation using a list
+of locks hold by each thread and we defined a lock's priority as the highest
+priority of all threads waiting for the lock. This led to a simple design 
+from a conceptual standpoint by having all the functionality in one place.  
 
               ADVANCED SCHEDULER
               ==================
