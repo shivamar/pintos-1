@@ -228,12 +228,12 @@ advantage of a liner complexity with the number of threads as worst case.
 >> B4: Describe the sequence of events when a call to lock_acquire()
 >> causes a priority donation.  How is nested donation handled?
 
-When we try to aquire a lock we check if that lock is hold by another thread
+When we try to aquire a lock we check if that lock is held by another thread
 and if this is the case we donate the current thread's priority to the thread
-holder. Nested donation could occur if the lock holder is also blocked by 
-another thread holding a lock he is trying to aquire. In this case we will
-donate priority to all the threads in such a chain. We didn't impose any 
-limit to priority donation because the threads list is usually quite small
+that holds the lock. Nested donation could occur if the lock holder is also 
+blocked by another thread holding a lock he is trying to aquire. In this case 
+we will donate priority to all the threads in such a chain. We didn't impose 
+any limit to priority donation because the threads list is usually quite small
 and in practice nested donations are even smaller. 
 
 >> B5: Describe the sequence of events when lock_release() is called
@@ -286,7 +286,7 @@ locks. Another possible approach is to put the logic for priority donation
 in the thread struct, and handle things from there. This was a bit of overhead
 and required a lot of changes in diffrent parts of the code. 
 
-Finally, we decided to write all functionality in lock_aquire and lock_relase.
+Finally, we decided to write all functionality in lock_acquire and lock_release.
 This has the advantage that it is all in one place so it's easy to change
 when we use the advanced scheduler. We handled nested donation using a list
 of locks hold by each thread and we defined a lock's priority as the highest
