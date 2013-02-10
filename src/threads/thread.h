@@ -106,8 +106,9 @@ struct thread
     struct list locks;                  /* List of locks hold by a thread */
     struct lock *blocked;               /* The lock blocking the thread */
 
-    int nice;                           /* Nice value */
-    int32_t recent_cpu;                 /* Recent CPU value */
+    int nice;                           /* Nice value. */
+    int32_t recent_cpu;                 /* Recent CPU value in 17.14 
+                                           Fixed Point representation. */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */

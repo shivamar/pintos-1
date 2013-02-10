@@ -15,6 +15,7 @@
 #include "userprog/process.h"
 #endif
 #include "threads/fixed-point.h"
+#include "devices/timer.h"
 
 /* Random value for struct thread's `magic' member.
    Used to detect stack overflow.  See the big comment at the top
@@ -60,8 +61,8 @@ static unsigned thread_ticks;   /* # of timer ticks since last yield. */
    Controlled by kernel command-line option "-o mlfqs". */
 bool thread_mlfqs;
 
-/* Load average for the system */
-int32_t load_avg;
+/* Load average for the system in 17.14 Fixed Point format.*/
+static int32_t load_avg;
 
 static void kernel_thread (thread_func *, void *aux);
 
@@ -75,6 +76,7 @@ static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
 static void thread_calculate_priority (struct thread *t, void *aux UNUSED);
+static void recalculate_BSD_variables (void);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -138,23 +140,41 @@ thread_tick (void)
 #endif
   else
     kernel_ticks++;
-
-  /* Incrent the current thread's recent cpu value if mlfqs is being used. */
-  if (thread_mlfqs && thread_current () != idle_thread)
-    {
-      t->recent_cpu = fixed_point_add_int (t->recent_cpu, 1);
-    }
+  
+  /* Recalculate the variables used for the BSD scheduler 
+     if it is being used.*/
+  if (thread_mlfqs)
+    recalculate_BSD_variables ();
+  
+  thread_ticks++;  
 
   /* Enforce preemption. */
-  if (++thread_ticks >= TIME_SLICE)
-  {
-    /* Re-calculate priorities for all threads if mlfqs is being used. */
-    if (thread_mlfqs)
-      {
-        thread_foreach (&thread_calculate_priority, NULL);
-      }
+  if (thread_ticks >= TIME_SLICE)
     intr_yield_on_return ();
-  }
+}
+
+/* Recalculte the variables used in the BSD scheduler. */
+void
+recalculate_BSD_variables (void)
+{
+  ASSERT (thread_mlfqs);
+  
+  struct thread *t = thread_current ();
+  
+ /* Update recent cpu and load avg every second. */
+  if (timer_ticks () % TIMER_FREQ == 0)
+    {
+      thread_calculate_load_avg ();
+      thread_foreach (&thread_calculate_recent_cpu, NULL);
+    }
+  
+  /* Incrent the current thread's recent cpu value. */
+  if (thread_current () != idle_thread)
+    t->recent_cpu = fixed_point_add_int (t->recent_cpu, 1);
+
+  /* Recalculates priorities for every thread every 4 ticks. */
+  if (timer_ticks () % TIME_SLICE == 0) 
+    thread_foreach (&thread_calculate_priority, NULL);
 }
 
 /* Prints thread statistics. */
@@ -234,7 +254,7 @@ thread_create (const char *name, int priority,
 }
 
 /* Uses numeric less than on priority to compare two 
-   elements of the ready threads list */
+   elements of the ready threads list. */
 bool
 priority_less_func (const struct list_elem *a,
                     const struct list_elem *b,
@@ -397,13 +417,13 @@ thread_set_priority_extra (struct thread *curr, int new_priority, bool force)
     curr->priority = new_priority;
 
   if (curr->status == THREAD_RUNNING && !list_empty(&ready_list))   
-  {
-    struct thread * next = list_entry (list_max (&ready_list, 
-            &priority_less_func, NULL), struct thread, elem);
+    {
+      struct thread * next = list_entry (list_max (&ready_list, 
+              &priority_less_func, NULL), struct thread, elem);
 
-    if(curr->priority < next->priority)
-      thread_yield ();
-  }
+      if(curr->priority < next->priority)
+        thread_yield ();
+    }
 }
 
 /* Returns the current thread's priority. */
@@ -413,7 +433,7 @@ thread_get_priority (void)
   return thread_current ()->priority;
 }
 
-/* Calculates and sets the priority of thread t for the BSD Scheduler */
+/* Calculates and sets the priority of thread t for the BSD Scheduler. */
 void
 thread_calculate_priority (struct thread *t, void *aux UNUSED)
 {
@@ -425,14 +445,11 @@ thread_calculate_priority (struct thread *t, void *aux UNUSED)
                                                   int_to_fixed_point(t->nice * 2));
   int int_priority = fixed_point_to_int_round_to_zero (fp_priority);
   if (int_priority > PRI_MAX)
-    {
-      int_priority = PRI_MAX;
-    }
+    int_priority = PRI_MAX;
 
   if (int_priority < PRI_MIN)
-    {
-      int_priority = PRI_MIN;
-    }
+    int_priority = PRI_MIN;
+   
   t->priority = int_priority;
 }
 
@@ -452,7 +469,9 @@ thread_calculate_recent_cpu (struct thread *t, void *aux UNUSED)
   t->recent_cpu = recent_cpu;
 }
 
-/* Sets the current thread's nice value to NICE. */
+/* Sets the current thread's nice value to nice and recalculates
+   the thread's priority. Thread yields if it no longer has the 
+   highest priority. */
 void
 thread_set_nice (int nice)
 {
@@ -492,7 +511,7 @@ thread_get_load_avg (void)
   return rounded_load_avg;
 }
 
-/* Calculates and sets the current system load average */
+/* Calculates and sets the current system load average. */
 void
 thread_calculate_load_avg (void)
 {

@@ -4,6 +4,7 @@
 #include <round.h>
 #include <stdint.h>
 #include <list.h>
+#include "threads/synch.h"
 
 /* Number of timer interrupts per second. */
 #define TIMER_FREQ 100
@@ -11,10 +12,11 @@
 /* Struct for representing a thread that is sleeping */
 struct sleeping_thread
   {
-    struct thread * thread;  /* Pointer to the thread that is sleeping */
-    int64_t sleep_until_ticks;  /* Number of ticks since CPU 
-                                   start to sleep until */
-    struct list_elem elem;  /* List element used for traversing the list */
+    int64_t wake_at_ticks;      /* Number of ticks since CPU 
+                                   start to be woken up at */
+    struct semaphore sema;      /* Semaphore for blocking and 
+                                   unblocking the thread */
+    struct list_elem elem;      /* List element used for traversing the list */
   };
 
 void timer_init (void);

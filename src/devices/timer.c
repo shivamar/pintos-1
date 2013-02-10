@@ -7,7 +7,6 @@
 #include "threads/interrupt.h"
 #include "threads/synch.h"
 #include "threads/thread.h"
-#include "threads/malloc.h"
   
 /* See [8254] for hardware details of the 8254 timer chip. */
 
@@ -28,9 +27,6 @@ static unsigned loops_per_tick;
 /* List of sleeping threads */
 struct list sleeping_threads_list;
 
-/* List of pointers to memory that needs to be freed */
-struct list pointers_to_free;
-
 static intr_handler_func timer_interrupt;
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
@@ -39,6 +35,7 @@ static void real_time_delay (int64_t num, int32_t denom);
 static bool ticks_less_func (const struct list_elem *a, 
                              const struct list_elem *b,
                              void *aux UNUSED);
+static void wake_up_sleeping_threads (void);
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
 void
@@ -47,7 +44,6 @@ timer_init (void)
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
   list_init (&sleeping_threads_list);
-  list_init (&pointers_to_free);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -100,30 +96,21 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 { 
-  struct sleeping_thread * current_thread;
+  struct sleeping_thread current_thread;
   int64_t start = timer_ticks ();
 
   ASSERT (intr_get_level () == INTR_ON);
-
+  
+  current_thread.wake_at_ticks = start + ticks;
+  sema_init (&current_thread.sema, 0);
+ 
   enum intr_level old_level = intr_disable ();
 
-  while (!list_empty (&pointers_to_free))
-    {
-      struct list_elem *front = list_pop_front (&pointers_to_free);
-      struct sleeping_thread *to_free = list_entry (front, 
-                                                    struct sleeping_thread,
-                                                    elem);
-      free (to_free);
-    }
-
-  current_thread = malloc (sizeof (struct sleeping_thread));
-  ASSERT (current_thread != NULL);  
-  current_thread->thread = thread_current();
-  current_thread->sleep_until_ticks = start + ticks;
-  list_insert_ordered (&sleeping_threads_list, &current_thread->elem, 
+  list_insert_ordered (&sleeping_threads_list, &current_thread.elem, 
                        &ticks_less_func, NULL);
-  thread_block ();
   intr_set_level (old_level);  
+
+  sema_down (&current_thread.sema);
 }
 
 /* Uses numeric less than on sleep_until_ticks to compare two 
@@ -138,7 +125,7 @@ ticks_less_func (const struct list_elem *a,
   a_sleeping = list_entry (a, struct sleeping_thread, elem);
   b_sleeping = list_entry (b, struct sleeping_thread, elem);
 
-  return a_sleeping->sleep_until_ticks < b_sleeping->sleep_until_ticks; 
+  return a_sleeping->wake_at_ticks < b_sleeping->wake_at_ticks; 
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -216,28 +203,29 @@ static void
 timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
+  enum intr_level old_level = intr_disable ();
+  
+  wake_up_sleeping_threads (); 
   thread_tick ();
+  
+  intr_set_level (old_level);
+}
+
+/* Wakes up all sleeping threads that are to woken at this timer tick */
+void
+wake_up_sleeping_threads (void)
+{ 
   struct list_elem * current_elem;
   struct sleeping_thread * current_item;
   
-  enum intr_level old_level = intr_disable ();
-  
-  /* Update recent cpu and load avg every second */
-  if (thread_mlfqs && timer_ticks () % TIMER_FREQ == 0)
-    {
-      thread_calculate_load_avg ();
-      thread_foreach (&thread_calculate_recent_cpu, NULL);
-    }
-
   while (!list_empty (&sleeping_threads_list))
     {
       current_elem = list_pop_front (&sleeping_threads_list);  
       current_item = list_entry (current_elem, struct sleeping_thread, elem);
       
-      if (current_item->sleep_until_ticks <= ticks)
+      if (current_item->wake_at_ticks <= ticks)
         {
-          thread_unblock (current_item->thread);
-          list_push_front (&pointers_to_free, current_elem);
+          sema_up (&current_item->sema);
         }
       else
        {
@@ -245,7 +233,6 @@ timer_interrupt (struct intr_frame *args UNUSED)
          break;
        }
     }
-  intr_set_level (old_level);
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer

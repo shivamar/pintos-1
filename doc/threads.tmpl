@@ -8,7 +8,6 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
 Irina-Elena Veliche <irina-elena.veliche11@imperial.ac.uk>
 Paul Rowe-White <paul.rowe-white11@imperial.ac.uk>
 Andrei Bogdan Antonescu <andrei.antonescu11@imperial.ac.uk>
@@ -31,48 +30,120 @@ Andrei Bogdan Antonescu <andrei.antonescu11@imperial.ac.uk>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+New Struct:
+
 The sleeping thread struct is used to record sleeping threads so that they 
 can be blocked until the time they want to be woken. 
 /* Struct for representing a thread that is sleeping */
 struct sleeping_thread
   {
-    struct thread * thread;  /* Pointer to the thread that is sleeping */
-    int64_t sleep_until_ticks;  /* Number of ticks since CPU 
-                                   start to sleep until */
-    struct list_elem elem;  /* List element used for traversing the list */
+    int64_t wake_at_ticks;      /* Number of ticks since CPU 
+                                   start to be woken up at */
+    struct semaphore sema;      /* Semaphore for blocking and 
+                                   unblocking the thread */ 
+    struct list_elem elem;      /* List element used for traversing the list */
   };
+
+Static Variables in timer.c:
 
 This is the list of sleeping threads, ordered by the time to be woken at in 
 ascending order.
 /* List of sleeping threads */
 struct list sleeping_threads_list;
 
-This is the list of sleeping thread structs of threads that have been woken
-so the memory of the list element can be recovered.
-/* List of pointers to memory that needs to be freed */
-struct list pointers_to_free;
-
-
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe what happens in a call to timer_sleep(),
 >> including the effects of the timer interrupt handler.
 
+When a thread calls timer_sleep() it is blocked until to required amount of 
+ticks have passed. The time to wake up at is calculated by adding the current 
+number of timer ticks to the required amount of ticks to sleep for. This is
+stored in a struct sleeping_thread along with a new semaphore that is
+intialised with a value of  0. The struct is then added to the list of 
+sleeping threads. sema_down is then called on the new semaphore which causes 
+the current thread to be blocked.
+
+In the timer interrupt handler the list of sleeping threads is checked to see
+if any threads need to be woken at the current number of ticks. If so then 
+sema_up is called on the thread so that it gets unblocked. 
+
 >> A3: What steps are taken to minimize the amount of time spent in
 >> the timer interrupt handler?
+
+To minimise the time spent in the interrupt handler, the list of sleeping
+threads is kept in ascending order of the time to wake. This means that when 
+the list is inspected for threads to wake up, the first element in the list can
+be removed and checked until a thread with a wake up time greater than the 
+current number of ticks is found. When this happens there will be no more 
+threads that need waking up in the list and so the interrupti handler can move 
+on.
 
 ---- SYNCHRONIZATION ----
 
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+If multiple threads call timer_sleep() simultaneously then race conditions 
+are avoided by disabling interrupts around the call to list_insert_ordered() 
+to insert the current thread into the list of sleeping threads.
+This is required as the list is also accessed from within an interrupt handler
+(see next question). As disabling interrupts is required there is no need for 
+any other synchronisation mechanisms for when multiple threads call 
+timer_sleep(). This is because disabling interrupts around 
+list_insert_ordered() makes that operation atomic so no other threads will be
+scheduled during this call. This is the only call that accesses shared data so
+there is no race condition on any other operation in timer_sleeep(). 
+
+A lock could have been used to prevent race conditions between threads 
+accessing the list of sleeping threads at the same time if it was not accessed
+from within an interrupt handler. 
+
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?
+
+If a timer interrupt occurs during a call to timer_sleep(), race conditions 
+are avoided by disabling interrupts around the call to list_insert_ordered() to
+insert the current thread into the list of sleeping threads.
+This is because the sleeping threads list is accessed from both the 
+timer_sleep() function and the timer interrupt. timer_sleep() inserts elements
+in the correct position to maintain the ordering of list and the timer 
+interrupt removes elements from the list. If a timer interrupt were allowed to
+occur while an element was being added then one of the elements either side of
+the position to insert may be deleted before the insert can be completed, 
+leading to some elements having incorrect pointers.
+
+Disabling interrupts is the only way to ensure mutual exclusion as the 
+interrupt handler cannot acquire a lock or down a semaphore as it must not be 
+allowed to sleep, which can happen with both of these synchronisation 
+mechanisms. The time interrupts are disabled is kept to a minimum by 
+re-enabling them once the call to list_insert_ordered() is finished. 
 
 ---- RATIONALE ----
 
 >> A6: Why did you choose this design?  In what ways is it superior to
 >> another design you considered?
+
+I chose this design because I feel that it is very simple and efficient. 
+Maintaining an ordered list of sleeping threads means that checking each 
+sleeping thread to see if it need waking up is very quick and the space 
+requirements are low as only the wake up time, the thread semaphore and a 
+list element need to be stored for each thread that is sleeping. The wake up 
+time and the semaphore could have been put in the struct thread so every 
+thread would have them and the semaphore would not have to be re-initialised
+every time the same thread sleeps, it could just be reused. However, to check
+what threads need waking up every thread that had been created would have to 
+be checked, even those that were not asleep. This would be very inefficient 
+and would always take the same amount of time, whereas the check on the 
+separate list can be terminated very quickly. It is also not a very clean 
+design as variables that are only used in timer_sleep() are put in the general
+thread structure and increases its size on the thread memory page, which is 
+small, leaving less room for the thread's stack.
+
+A semaphore is used to do the thread blocking and unblocking instead of calling
+thread_block() and thread_unblock() directly as these are lower level and
+used by the semaphore anyway. 
+ 
 
              PRIORITY SCHEDULING
              ===================
@@ -118,6 +189,18 @@ struct list pointers_to_free;
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+Struct Members:
+Added to struct thread:
+  /* Members for BSD Scheduler. */
+  int nice;                           /* Nice value of the thread. */
+  int32_t recent_cpu;                 /* Recent CPU value of the thread in 
+                                         17.14 Fixed-Point representation. */
+
+Static Variables in thread.c:
+
+Load average for the system, stored in 17.14 Fixed-Point format.
+int32_t load_avg;                   
+
 ---- ALGORITHMS ----
 
 >> C2: Suppose threads A, B, and C have nice values 0, 1, and 2.  Each
@@ -128,23 +211,56 @@ struct list pointers_to_free;
 timer  recent_cpu    priority   thread
 ticks   A   B   C   A   B   C   to run
 -----  --  --  --  --  --  --   ------
- 0
- 4
- 8
-12
-16
-20
-24
-28
-32
-36
+ 0      0   0   0  63  61  58     A
+ 4      4   0   0  62  61  59     A
+ 8      8   0   0  61  61  59     B
+12      8   4   0  61  60  59     A
+16     12   4   0  60  60  59     B
+20     12   8   0  60  59  59     A
+24     16   8   0  59  59  59     C
+28     16  12   0  59  59  58     B
+32     16  12   4  59  58  58     A
+36     20  12   4  58  58  58     C
 
 >> C3: Did any ambiguities in the scheduler specification make values
 >> in the table uncertain?  If so, what rule did you use to resolve
 >> them?  Does this match the behaviour of your scheduler?
 
+The scheduler specification did not say in which order the calculation of
+priority for each thread and the increment of the recent cpu value should be 
+done if both need doing on the same clock tick. I decided to increment the
+recent cpu value of the current thread before calculating the priority of the 
+threads so that the recent cpu value used in the priority calculation for the 
+current thread is a more accurate value and it make more sense than using it 
+in a calculation and then incrementing it.
+This table matches the behaviour of my scheduler. Every tick the recent cpu 
+value is incremented for the current thread and every 4 ticks the priorities
+are re-calculated for each thread. The thread with the highest priority runs,
+and when multiple threads have the same priority the one with the longest 
+time since it was last scheduled is run.
+
 >> C4: How is the way you divided the cost of scheduling between code
 >> inside and outside interrupt context likely to affect performance?
+
+Most of the BSD scheduler runs inside interrupt context. This is due to the 
+specification requiring that the system load average and the recent cpu for 
+each thread is calculated exactly every second. If these calculations were 
+offloaded onto a kernel thread, the thread could be interrupted with a timer 
+tick and then the calculations would not be done at the correct time.
+The recalculation of thread priorities every 4 ticks also runs within the
+interrupt context. This is because the recalculated priorities need to be 
+finished before the scheduler runs so that correct thread runs next. If only 
+some of the priorities were updated before the scheduler run, then the wrong 
+thread could be chosen to run next.
+
+Having all of the calculations done in the interrupt context is not ideal as
+this prevents other interrupts occurring and means the thread that was 
+interrupted has less time to run. However these calculations need to be done at
+specific times and the values that they use should not change from when a value 
+is calculated for one thread to another. The priorities calculations could be 
+shifted to just before the thread yields on returning from the interrupt 
+handler, but the calculations would still be done before the thread yields so
+would not improve the performance from the way it is currently done.
 
 ---- RATIONALE ----
 
@@ -153,12 +269,41 @@ ticks   A   B   C   A   B   C   to run
 >> time to work on this part of the task, how might you choose to
 >> refine or improve your design?
 
+I feel that this design is good in terms of simplicity and readability. The
+implementation is split well between a set of functions that can be clearly
+understood as to what they do. All the functions are also grouped together in
+one file. Macros provide and simple and efficient implementation of the fixed-
+point operations that are required. 
+
+A disadvantage would be that most of calculations required for the scheduling
+is done in the interrupt context of the timer interrupt. This is not good so if
+I were to have extra time, I would look to see if any of the calculations could
+be done outside the interrupt context whilst still maintaining the correct
+behaviour of the system.
+
 >> C6: The assignment explains arithmetic for fixed-point mathematics in
 >> detail, but it leaves it open to you to implement it.  Why did you
 >> decide to implement it the way you did?  If you created an
 >> abstraction layer for fixed-point mathematics, that is, an abstract
 >> data type and/or a set of functions or macros to manipulate
 >> fixed-point numbers, why did you do so?  If not, why not?
+
+To implement the fixed-point mathematics, I created a set of macros for all
+of the arithmetic operations given in the specification. This was so that I 
+could place the calculations within my code without having to continually
+look them up. This also make the code more readable as the operations have 
+names in the code rather than just looking at the implementation of each and 
+having to find out what each one does. As the calculations are only written 
+out once it meant that there was less risk of errors compared to typing each
+once out multiple times, and if an error was made in the implementation of a 
+calculation (which did occur), then it only needed to be changed in one place
+and would be updated thought the code. 
+
+The above could have been achieved by using a function for each calculation,
+rather than a macro. I decided against this however as this would cause
+overhead at runtime for the function call. By contrast the overhead of a macro 
+is at compile time when the pre-processor runs and replaces the macros with the
+defined values. 
 
                SURVEY QUESTIONS
                ================
