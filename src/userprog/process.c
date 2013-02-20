@@ -29,6 +29,9 @@ tid_t
 process_execute (const char *file_name) 
 {
   char *fn_copy;
+  char *fn_copy_2;
+  char *name;
+  char *save_ptr;
   tid_t tid;
 
   /* Make a copy of FILE_NAME.
@@ -38,8 +41,15 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
+  fn_copy_2 = palloc_get_page (0);
+  if (fn_copy_2 == NULL)
+    return TID_ERROR;
+  strlcpy (fn_copy_2, file_name, PGSIZE);
+  
+  name = strtok_r (fn_copy_2, " ", &save_ptr);
+  
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
     palloc_free_page (fn_copy); 
   return tid;
@@ -53,18 +63,87 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  char *save_ptr;
+  char *token;
+  int i;
+  int argc = 0;
+  intptr_t stack_pointer;
+  char* argv[10`0]; 
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  success = load (file_name, &if_.eip, &if_.esp);
 
-  /* If load failed, quit. */
+  /* Extract file name. */
+  token = strtok_r (file_name, " ", &save_ptr);
+ 
+  success = load (token, &if_.eip, &if_.esp);
+
+  stack_pointer = (intptr_t) if_.esp;
+
+  /* Tokenise String and push each token on the stack. */
+  do
+    {
+      argv[argc] = token;
+      argc++;
+      size_t len = strlen (token);
+      stack_pointer = (intptr_t) (((char*) stack_pointer)- (len + 1));
+      strlcpy ((char*)stack_pointer, token, len + 1);
+      hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+ 
+      token = strtok_r (NULL, " ", &save_ptr);
+    } while (token != NULL);
+
+
+ /* Round stack pionter down to a multiple of 4. */
+  stack_pointer &= 0xfffffffc;
+
+ /* Push null sentinel. */
+  stack_pointer = (intptr_t) (((char*) stack_pointer) - 1);
+  *((char*)(stack_pointer)) = 0;
+
+  printf("Starting to push pointers\n");
+  /* Push pointers to arguments. */    
+  for (i = argc - 1; i >= 0; --i)
+    {
+      hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+      stack_pointer = (intptr_t) (((char*) stack_pointer) - 1);
+      *((char**) stack_pointer) = argv[i];
+      hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+    } 
+
+  /* Push argv. */
+  stack_pointer = (intptr_t) (((char**) stack_pointer) - 1);
+  *((char***) stack_pointer) = &argv[0];
+
+  printf("Pushing argv.\n");
+  hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+
+  /* Push argc. */
+  stack_pointer = (intptr_t) (((int) stack_pointer) - 1);
+  *((int*) stack_pointer) = argc;
+
+  printf("Pushing argc.\n");
+  hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+  
+  /* Push null sentinel. */
+  stack_pointer = (intptr_t) (((void*) stack_pointer) - 1);
+  *((void**)(stack_pointer)) = 0;
+ 
+  printf("Pushing null.\n");
+  hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+
+  if_.esp = (void *) stack_pointer;
+
+  printf("All done.\n");
+  hex_dump (0xbfffffcc, (void *) 0xbfffffcc, 68, true);
+  
+/* If load failed, quit. */
   palloc_free_page (file_name);
   if (!success) 
-    thread_exit ();
+    thread_exit ();  
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -88,6 +167,7 @@ start_process (void *file_name_)
 int
 process_wait (tid_t child_tid UNUSED) 
 {
+  while(true);
   return -1;
 }
 
@@ -437,7 +517,7 @@ setup_stack (void **esp)
     {
       success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
       if (success)
-        *esp = PHYS_BASE - 12;
+        *esp = PHYS_BASE;
       else
         palloc_free_page (kpage);
     }
