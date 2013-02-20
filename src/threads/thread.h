@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -28,6 +29,11 @@ typedef int tid_t;
 #define NICE_MIN -20
 #define NICE_DEFAULT 0
 #define NICE_MAX 20
+
+#ifdef USERPROG
+#define RET_STATUS_DEFAULT 0
+#define RET_STATUS_ERROR -1
+#endif
 
 /* Recent CPU default value */
 #define RECENT_CPU_DEFAULT 0
@@ -113,6 +119,13 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct semaphore sema_wait;         /* Semaphore for process_wait. */
+    struct semaphore sema_exit;         /* Semaphore for process_exit. */
+    struct thread *parent;              /* The parent of the thread */
+    struct list children;               /* A list of children process */
+    struct list_elem child_elem;        /* List elem for children list */
+    int ret_status;                     /* Return status. */
+    bool exited;                        /* If the proccess exited? */
 #endif
 
     /* Owned by thread.c. */
@@ -143,6 +156,7 @@ void thread_unblock (struct thread *);
 
 struct thread *thread_current (void);
 tid_t thread_tid (void);
+struct thread *thread_by_tid (tid_t);
 const char *thread_name (void);
 
 void thread_exit (void) NO_RETURN;
