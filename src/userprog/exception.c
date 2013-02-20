@@ -150,7 +150,7 @@ page_fault (struct intr_frame *f)
 
   if (!user)
     {
-      f->eip = f->eax;
+      f->eip = (void*) f->eax;
       f->eax = 0xffffffff;
     }
 
