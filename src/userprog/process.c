@@ -78,9 +78,9 @@ start_process (void *file_name_)
   bool success;
   char *save_ptr;
   char *token;
-  int i;
+  int i, j;
   int argc = 0;
-  intptr_t stack_pointer;
+  void* stack_pointer;
   char* argv[100]; 
   struct thread *cur;
 
@@ -95,48 +95,56 @@ start_process (void *file_name_)
  
   success = load (token, &if_.eip, &if_.esp);
 
-  stack_pointer = (intptr_t) if_.esp;
+  stack_pointer = if_.esp;
 
   /* Tokenise String and push each token on the stack. */
-  do
+    do
     {
       argv[argc] = token;
       argc++;
-      size_t len = strlen (token);
-      stack_pointer = (intptr_t) (((char*) stack_pointer)- (len + 1));
-      strlcpy ((char*)stack_pointer, token, len + 1);
       token = strtok_r (NULL, " ", &save_ptr);
     } while (token != NULL);
 
+    for (j = argc - 1; j >= 0; --j) 
+      {
+        size_t len = strlen (argv[j]) + 1;
+        stack_pointer = (void*) (((char*) stack_pointer) - len);
+        strlcpy ((char*)stack_pointer, argv[j], len);
+        argv[j] = (char*) stack_pointer;
+      }
 
- /* Round stack pionter down to a multiple of 4. */
-  stack_pointer &= 0xfffffffc;
+  /* Round stack pionter down to a multiple of 4. */
+  stack_pointer = (void*) (((intptr_t) stack_pointer) & 0xfffffffc);
 
- /* Push null sentinel. */
-  stack_pointer = (intptr_t) (((char*) stack_pointer) - 1);
+  /* Push null sentinel. */
+  stack_pointer = (((char**) stack_pointer) - 1);
   *((char*)(stack_pointer)) = 0;
 
   /* Push pointers to arguments. */    
   for (i = argc - 1; i >= 0; --i)
     {
-      stack_pointer = (intptr_t) (((char*) stack_pointer) - 1);
+      stack_pointer = (((char**) stack_pointer) - 1);
       *((char**) stack_pointer) = argv[i];
     } 
 
   /* Push argv. */
-  stack_pointer = (intptr_t) (((char**) stack_pointer) - 1);
-  *((char***) stack_pointer) = &argv[0];
+  char** first_arg_pointer = (char**) stack_pointer;
+  stack_pointer = (((char**) stack_pointer) - 1);
+  *((char***) stack_pointer) = first_arg_pointer;
 
+  
   /* Push argc. */
-  stack_pointer = (intptr_t) (((int) stack_pointer) - 1);
-  *((int*) stack_pointer) = argc;
-  
-  /* Push null sentinel. */
-  stack_pointer = (intptr_t) (((void*) stack_pointer) - 1);
-  *((void**)(stack_pointer)) = 0;
+  int* stack_int_pointer = (int*) stack_pointer;
+  --stack_int_pointer;
+  *stack_int_pointer = argc;
+  stack_pointer = (void*) stack_int_pointer;
 
-  if_.esp = (void *) stack_pointer;
-  
+  /* Push null sentinel. */
+  stack_pointer = (((void**) stack_pointer) - 1);
+  *((void**)(stack_pointer)) = 0;
+ 
+  if_.esp = stack_pointer;  
+ 
   cur = thread_current ();
 
   if (success) 
