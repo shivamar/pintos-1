@@ -167,6 +167,11 @@ sys_write (int fd, const void *buffer, unsigned length)
     struct file *f;
     int ret = -1;
 
+    /* Check first and last characters can be read without error. */
+    if (get_user_byte (buffer) == -1 
+        && get_user_byte (buffer + length - 1) == -1)
+        sys_exit (-1);
+
     lock_acquire (&file_lock);
     if (fd == STDOUT_FILENO)
         putbuf (buffer, length);
