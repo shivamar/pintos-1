@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <syscall-nr.h>
 #include "devices/shutdown.h"
+#include "devices/input.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 #include "threads/synch.h"
@@ -35,10 +36,12 @@ static void      sys_seek (int fd, unsigned position);
 static unsigned  sys_tell (int fd);
 static void      sys_close (int fd);
 
-static int get_user_byte (const uint8_t *uaddr);
+#ifdef MEMORY_TEST
+static bool read_user_byte (const uint8_t *uaddr);
 static bool write_user_byte (uint8_t *uaddr, uint8_t byte);
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
+#endif
 static struct file *file_by_fid (fid_t);
 static struct file *file_by_fid_in_thread (fid_t);
 static fid_t allocate_fid (void);
@@ -180,10 +183,15 @@ static int
 sys_filesize (int fd)
 {
   struct file *f;
+  int size = -1;  
+
+  lock_acquire (&file_lock);
   f = file_by_fid (fd);
-  if (f == NULL)
-    return -1;
-  return file_length (f);  
+  if (f != NULL)
+    size = file_length (f);  
+  lock_release (&file_lock);
+
+  return size;
 }
 
 /* Read from a file. */
@@ -196,7 +204,7 @@ sys_read (int fd, void *buffer, unsigned length)
   lock_acquire (&file_lock);
   if (fd == STDIN_FILENO)
     {
-      int i;
+      unsigned i;
       for (i = 0; i < length; ++i)
         *(uint8_t *)(buffer + i) = input_getc ();
       ret = length;
@@ -260,10 +268,12 @@ sys_seek (int fd, unsigned position)
 {
   struct file *f;
 
+  lock_acquire (&file_lock);
   f = file_by_fid (fd);
   if (!f)
     sys_exit (-1);
   file_seek (f, position);
+  lock_release (&file_lock);
 }
 
 /* Report current position in a file. */
@@ -271,11 +281,16 @@ static unsigned
 sys_tell (int fd)
 {
   struct file *f;
+  unsigned status;
 
+  lock_acquire (&file_lock);
   f = file_by_fid (fd);
   if (!f)
     sys_exit (-1);
-  return file_tell (f); 
+  status = file_tell (f); 
+  lock_release (&file_lock);
+  
+  return status;
 }
 
 /* Close a file. */
@@ -337,16 +352,17 @@ file_by_fid_in_thread (int fid)
   return NULL;
 }
 
-static int
-get_user_byte (const uint8_t *uaddr)
+#ifdef MEMORY_TEST
+static bool
+read_user_byte (const uint8_t *uaddr)
 {
   if (is_user_vaddr (uaddr))
     {
-      return get_user (uaddr);
+      return get_user (uaddr) != -1;
     }
   else
     {
-      return -1;
+      return false;
     }
 }
 
@@ -387,3 +403,4 @@ put_user (uint8_t *udst, uint8_t byte)
        : "=&a" (error_code), "=m" (*udst) : "q" (byte));
   return error_code != -1;
 }
+#endif
