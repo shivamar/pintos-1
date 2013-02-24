@@ -186,9 +186,9 @@ process_wait (tid_t child_tid)
   cur = thread_current ();
   t = thread_by_tid (child_tid);
   
-  if (t == NULL || t->exited == true || t->parent != cur)
+  if (t == NULL || t->parent != cur || t->waited)
     return RET_STATUS_ERROR;
-  else if (t->ret_status != RET_STATUS_DEFAULT)
+  else if (t->ret_status != RET_STATUS_INIT || t->exited == true)
     return t->ret_status;
  
   //printf ("[PRO_WAIT] wait for %s(%d) from %s\n", t->name, child_tid, cur->name);
@@ -196,6 +196,7 @@ process_wait (tid_t child_tid)
   sema_down (&t->sema_wait);
   int ret = t->ret_status;
   sema_up (&t->sema_exit);
+  t->waited = true;
 
   return ret;
 }
@@ -207,8 +208,6 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
     
-  //printf ("[PRO_EXIT] exit for %s with %d\n", cur->name, cur->ret_status);
-
   printf ("%s: exit(%d)\n", cur->name, cur->ret_status);
 
   if (cur->exec != NULL)
@@ -220,9 +219,9 @@ process_exit (void)
   cur->exited = true;
   if (cur->parent != NULL)
     sema_down (&cur->sema_exit); 
-  if (cur->exec != NULL)
-    file_allow_write (cur->exec);
-    
+
+  //printf ("[PRO_EXIT] exit for %s with %d\n", cur->name, cur->ret_status);
+
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

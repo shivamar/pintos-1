@@ -32,7 +32,7 @@ typedef int tid_t;
 #define NICE_MAX 20
 
 #ifdef USERPROG
-#define RET_STATUS_DEFAULT 0
+#define RET_STATUS_INIT 0
 #define RET_STATUS_ERROR -1
 #endif
 
@@ -129,6 +129,7 @@ struct thread
     struct list_elem child_elem;        /* List elem for children list */
     int ret_status;                     /* Return status. */
     bool exited;                        /* If the proccess exited? */
+    bool waited;                        /* If parent thread has called wait */
 #endif
 
     /* Owned by thread.c. */
