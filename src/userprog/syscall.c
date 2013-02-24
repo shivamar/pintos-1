@@ -22,7 +22,7 @@ typedef int pid_t;
 static void syscall_handler (struct intr_frame *);
 
 static void      sys_halt (void);
-static void      sys_exit (int status);
+void             sys_exit (int status);
 static pid_t     sys_exec (const char *file);
 static int       sys_wait (pid_t pid);
 static bool      sys_create (const char *file, unsigned initial_size);
@@ -39,8 +39,12 @@ static int get_user_byte (const uint8_t *uaddr);
 static bool write_user_byte (uint8_t *uaddr, uint8_t byte);
 static int get_user (const uint8_t *uaddr);
 static bool put_user (uint8_t *udst, uint8_t byte);
+static struct file *file_by_fid (fid_t);
+static struct file *file_by_fid_in_thread (fid_t);
+static fid_t allocate_fid (void);
 
 static struct lock file_lock;
+static struct list file_list;
 
 typedef int (*handler) (uint32_t, uint32_t, uint32_t);
 static handler syscall_map[32];
@@ -64,7 +68,8 @@ syscall_init (void)
   syscall_map[SYS_TELL]     = (handler)sys_tell;
   syscall_map[SYS_CLOSE]    = (handler)sys_close;
 
-  lock_init (&file_lock);   
+  lock_init (&file_lock); 
+  list_init (&file_list);  
 }
 
 static void
@@ -73,14 +78,14 @@ syscall_handler (struct intr_frame *f)
   handler function;
   int *param = f->esp, ret;
 
-  if ( is_user_vaddr(param) == -1) 
-    sys_exit(-1);
+  if ( !is_user_vaddr(param) )
+    sys_exit (-1);
 
-  if (!( is_user_vaddr (param + 1) && is_user_vaddr (param + 2) && is_user_vaddr (param + 3)))
-    sys_exit(-1); 
+  if (!( is_user_vaddr (param + 1) && is_user_vaddr (param + 2) && is_user_vaddr (param + 3))) 
+    sys_exit (-1); 
 
   if (*param < SYS_HALT || *param > SYS_INUMBER)
-    sys_exit(-1);
+    sys_exit (-1);
 
   function = syscall_map[*param];
   
@@ -94,124 +99,206 @@ syscall_handler (struct intr_frame *f)
 static void
 sys_halt (void)
 {
-    shutdown_power_off ();
+  shutdown_power_off ();
 }
 
 /* Terminate this process. */
-static void
+void
 sys_exit (int status)
 {
-    struct thread *t;
-    
-    t = thread_current ();
-    // TO DO: close files
+  struct thread *t;
+  struct list_elem *e;    
 
-    t->ret_status = status;
-    thread_exit ();
-    return -1;
+  t = thread_current ();
+  while (!list_empty (&t->files) )
+    {
+      e = list_begin (&t->files);
+      sys_close ( list_entry (e, struct file, thread_elem)->fid );
+    }
+
+  t->ret_status = status;
+  thread_exit ();
 }
 
 /* Start another process. */
 static pid_t
 sys_exec (const char *file)
 {
-    // TO DO:
+  lock_acquire (&file_lock);
+  int ret = process_execute (file);
+  lock_release (&file_lock);
+  return ret;
 }
 
 /* Wait for a child process to die. */
 static int
 sys_wait (pid_t pid)
 {
-    return process_wait (pid);
+  return process_wait (pid);
 }
 
 /* Create a file. */
 static bool
-sys_create (const char *file, unsigned intitial_size)
+sys_create (const char *file, unsigned initial_size)
 {
-    // TO DO:
+  if (file == NULL)
+    sys_exit (-1);
+  return filesys_create (file, initial_size);
 }
 
 /* Delete a file. */
 static bool
 sys_remove (const char *file)
-{
-    // TO DO:
+{   
+   if (file == NULL)
+     sys_exit (-1);
+   return filesys_remove (file);
 }
 
 /* Open a file. */
 static int
 sys_open (const char *file)
 {
-    // TO DO:
+  struct file *f;
+
+  if (file == NULL)
+    return -1;
+  
+  f = filesys_open (file);
+  if (f == NULL)
+    return -1;
+
+  f->fid = allocate_fid ();
+  list_push_back (&file_list, &f->file_elem);
+  list_push_back (&thread_current ()->files, &f->thread_elem);
+
+  return f->fid;
 }
 
 /* Obtain a file's size. */
 static int
 sys_filesize (int fd)
 {
-    // TO DO:
+  struct file *f;
+  f = file_by_fid (fd);
+  if (f == NULL)
+    return -1;
+  return file_length (f);  
 }
 
 /* Read from a file. */
 static int
 sys_read (int fd, void *buffer, unsigned length)
 {
-    // TO DO:   
+  struct file *f;  
+  int ret = -1;
+
+  lock_acquire (&file_lock);
+  if (fd == STDIN_FILENO)
+    {
+      int i;
+      for (i = 0; i < length; ++i)
+        *(uint8_t *)(buffer + i) = input_getc ();
+      ret = length;
+    }
+  else if (fd == STDOUT_FILENO) 
+    ret = -1;
+  else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
+    {
+      lock_release (&file_lock);
+      sys_exit (-1);
+    }
+  else
+    {
+      f = file_by_fid (fd);
+      if (f == NULL)
+        ret = -1;
+      else
+        ret = file_read (f, buffer, length);
+    }
+  lock_release (&file_lock);
+
+  return ret;
 }
 
 /* Write to a file. */
 static int
 sys_write (int fd, const void *buffer, unsigned length)
 {
-    struct file *f;
-    int ret = -1;
+  struct file *f;
+  int ret = -1;
 
-    /* Check first and last characters can be read without error. */
-    if (get_user_byte (buffer) == -1 
-        && get_user_byte (buffer + length - 1) == -1)
-        sys_exit (-1);
-
-    lock_acquire (&file_lock);
-    if (fd == STDOUT_FILENO)
-        putbuf (buffer, length);
-    else if (fd == STDIN_FILENO)
-        ;//done
-    else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
-      {
-        lock_release (&file_lock);
-        sys_exit (-1);
-      } 
-    else
-      {
-        // TO DO: write to a file
-      }
-
-    lock_release (&file_lock);
-    return ret;
+  lock_acquire (&file_lock);
+  if (fd == STDIN_FILENO)
+    ret = -1;
+  else if (fd == STDOUT_FILENO) 
+    {
+      putbuf (buffer, length);
+      ret = length;
+    }
+  else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
+    {
+      lock_release (&file_lock);
+      sys_exit (-1);
+    } 
+  else
+    {
+      f = file_by_fid (fd);
+      if (f == NULL)
+        ret = -1;
+      else 
+        ret = file_write (f, buffer, length); 
+    }
+  lock_release (&file_lock);
+    
+  return ret;
 }
 
 /* Change position in a file. */
 static void
 sys_seek (int fd, unsigned position)
 {
-    //TO DO:
+  // TO DO:
 }
 
 /* Report current position in a file. */
 static unsigned
 sys_tell (int fd)
 {
-    // TO DO:
+  // TO DO:
 }
 
 /* Close a file. */
 static void
 sys_close (int fd)
 {
-    // TO DO:
+  // TO DO:
 }
 
+static fid_t
+allocate_fid (void)
+{
+  static fid_t next_fid = 2;
+  return next_fid++;
+}
+
+/* Returns the file with the given fid from all files */
+struct file *
+file_by_fid (fid_t fid)
+{
+  struct list_elem *e;
+  
+  for (e = list_begin (&file_list); e != list_end (&file_list);
+       e = list_next (e))
+    {
+      struct file *f = list_entry (e, struct file, file_elem);
+      if (f->fid == fid)
+        return f;
+    }
+
+  return NULL;
+}
+ 
 static int
 get_user_byte (const uint8_t *uaddr)
 {

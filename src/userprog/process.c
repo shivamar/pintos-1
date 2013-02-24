@@ -46,9 +46,8 @@ process_execute (const char *file_name)
   if (fn_copy_2 == NULL)
     return TID_ERROR;
   strlcpy (fn_copy_2, file_name, PGSIZE);
-  
   name = strtok_r (fn_copy_2, " ", &save_ptr);
-  
+    
   /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
@@ -58,12 +57,9 @@ process_execute (const char *file_name)
   }
 
   t = thread_by_tid (tid);
-
   sema_down (&t->sema_wait);
   if (t->ret_status == RET_STATUS_ERROR)
     tid = TID_ERROR;
-  while (t->status == THREAD_BLOCKED)
-    thread_unblock (t);
 
   return tid;
 }
@@ -81,7 +77,7 @@ start_process (void *file_name_)
   int i, j;
   int argc = 0;
   void* stack_pointer;
-  char* argv[100]; 
+  char* argv[100];
   struct thread *cur;
 
   /* Initialize interrupt frame and load executable. */
@@ -89,12 +85,12 @@ start_process (void *file_name_)
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
-  
+
   /* Extract file name. */
   token = strtok_r (file_name, " ", &save_ptr);
- 
-  success = load (token, &if_.eip, &if_.esp);
 
+  success = load (file_name, &if_.eip, &if_.esp);
+  
   stack_pointer = if_.esp;
 
   /* Tokenise String and push each token on the stack. */
@@ -105,7 +101,7 @@ start_process (void *file_name_)
       token = strtok_r (NULL, " ", &save_ptr);
     } while (token != NULL);
 
-    for (j = argc - 1; j >= 0; --j) 
+    for (j = argc - 1; j >= 0; --j)
       {
         size_t len = strlen (argv[j]) + 1;
         stack_pointer = (void*) (((char*) stack_pointer) - len);
@@ -120,19 +116,19 @@ start_process (void *file_name_)
   stack_pointer = (((char**) stack_pointer) - 1);
   *((char*)(stack_pointer)) = 0;
 
-  /* Push pointers to arguments. */    
+  /* Push pointers to arguments. */
   for (i = argc - 1; i >= 0; --i)
     {
       stack_pointer = (((char**) stack_pointer) - 1);
       *((char**) stack_pointer) = argv[i];
-    } 
+    }
 
   /* Push argv. */
   char** first_arg_pointer = (char**) stack_pointer;
   stack_pointer = (((char**) stack_pointer) - 1);
   *((char***) stack_pointer) = first_arg_pointer;
 
-  
+
   /* Push argc. */
   int* stack_int_pointer = (int*) stack_pointer;
   --stack_int_pointer;
@@ -142,25 +138,21 @@ start_process (void *file_name_)
   /* Push null sentinel. */
   stack_pointer = (((void**) stack_pointer) - 1);
   *((void**)(stack_pointer)) = 0;
- 
-  if_.esp = stack_pointer;  
- 
-  cur = thread_current ();
+
+  if_.esp = stack_pointer;
+
+  cur = thread_current();
 
   if (success) 
   {
+    cur->exec = filesys_open (file_name);
+    file_deny_write ( cur->exec );
     sema_up (&cur->sema_wait);
-    intr_disable ();
-    thread_block ();
-    intr_enable ();
   }
   else
   {
     cur->ret_status = RET_STATUS_ERROR;
     sema_up (&cur->sema_wait);
-    intr_disable ();
-    thread_block ();
-    intr_enable ();
     thread_exit ();
   }
    
@@ -198,12 +190,11 @@ process_wait (tid_t child_tid)
     return RET_STATUS_ERROR;
   else if (t->ret_status != RET_STATUS_DEFAULT)
     return t->ret_status;
-  
+ 
+  //printf ("[PRO_WAIT] wait for %s(%d) from %s\n", t->name, child_tid, cur->name);
+ 
   sema_down (&t->sema_wait);
-    
   int ret = t->ret_status;
-  printf ("%s: exit(%d)\n", t->name, t->ret_status);
-
   sema_up (&t->sema_exit);
 
   return ret;
@@ -216,13 +207,22 @@ process_exit (void)
   struct thread *cur = thread_current ();
   uint32_t *pd;
     
+  //printf ("[PRO_EXIT] exit for %s with %d\n", cur->name, cur->ret_status);
+
+  printf ("%s: exit(%d)\n", cur->name, cur->ret_status);
+
+  if (cur->exec != NULL)
+    file_allow_write (cur->exec);
+
   while (!list_empty (&cur->sema_wait.waiters))
     sema_up (&cur->sema_wait);
   
   cur->exited = true;
   if (cur->parent != NULL)
     sema_down (&cur->sema_exit); 
-
+  if (cur->exec != NULL)
+    file_allow_write (cur->exec);
+    
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
   pd = cur->pagedir;

@@ -5,6 +5,7 @@
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -122,6 +123,8 @@ struct thread
     struct semaphore sema_wait;         /* Semaphore for process_wait. */
     struct semaphore sema_exit;         /* Semaphore for process_exit. */
     struct thread *parent;              /* The parent of the thread */
+    struct file *exec;                  /* The file containing the thread executable */
+    struct list files;                  /* A list of open files */
     struct list children;               /* A list of children process */
     struct list_elem child_elem;        /* List elem for children list */
     int ret_status;                     /* Return status. */

@@ -26,13 +26,18 @@ tests = {}
 tests[1] = ["args-dbl-space", "args-many", "args-multiple", "args-none", "args-single"] 
 tests[2] = ["bad-jump", "bad-jump2", "bad-read", "bad-read2", "bad-write", "bad-write2"]
 tests[3] = ["wait-bad-pid", "wait-killed", "wait-simple", "wait-twice"]
-tests[4] = ["exec-arg", "exec-bad-ptr", "exec-missing", "exec-multiple", "exec-once"]
+tests[4] = ["exec-arg", "exec-bad-ptr", "exec-missing", "exec-multiple", "exec-once", "no-vm/multi-oom"]
 tests[5] = ["create-bad-ptr", "create-empty", "create-long", "create-null", "create-bound", "create-exists", "create-normal",
     "open-bad-ptr", "open-empty", "open-normal", "open-twice", "open-boundary", "open-missing", "open-null",
+    "close-bad-fd", "close-normal", "close-stdin", "close-stdout", "close-twice",
     "rox-child", "rox-multichild", "rox-simple"]
 tests[6] = ["read-bad-fd", "read-bad-ptr", "read-boundary", "read-normal", "read-stdout", "read-zero",
     "write-bad-fd", "write-bad-ptr", "write-boundary", "write-normal", "write-stdin", "write-zero"]
-tests[7] = ["sc-bad-arg", "sc-bad-sp", "sc-boundary-2", "sc-boundary", "null", "multi-recurse", "multi-child-fd", "halt", "exit"]
+tests[7] = ["sc-bad-arg", "sc-bad-sp", "sc-boundary-2", "sc-boundary", "multi-recurse", "multi-child-fd", "halt", "exit"]
+
+class stats:
+    total = 0
+    ok = 0
 
 # path to tests
 path = 'build/tests/userprog/'
@@ -60,8 +65,10 @@ def make():
 
 def grade(output, test_name, debug):
     ofset = ' ' * (65 - len(test_name))
+    stats.total = stats.total + 1
     if 'pass' in output:
         print 'Test ' + test_name +  ofset + color_green + ' Passed!' + color_end
+        stats.ok = stats.ok + 1
         return 1
     print 'Test ' + test_name + ofset + color_red + ' Failed!' + color_end
 
@@ -140,4 +147,10 @@ if __name__ == '__main__':
             continue
 
     print ''
+    print '_' * 80
+    if stats.total is not 0:
+        if stats.total == stats.ok:
+            print color_white + 'Passed ALL Tests!' + color_end
+        else:
+            print color_white + 'Passed ' + str(stats.ok) + ' out of ' + str(stats.total) + ' Tests!' 
 

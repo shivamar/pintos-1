@@ -260,6 +260,7 @@ thread_create (const char *name, int priority,
   t->parent = thread_current ();
   if (thread_current () != initial_thread)
     list_push_back (&thread_current ()->children, &t->child_elem);
+  list_init (&t->files);
 #endif
 
   return tid;
