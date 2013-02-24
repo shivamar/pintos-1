@@ -258,21 +258,40 @@ sys_write (int fd, const void *buffer, unsigned length)
 static void
 sys_seek (int fd, unsigned position)
 {
-  // TO DO:
+  struct file *f;
+
+  f = file_by_fid (fd);
+  if (!f)
+    sys_exit (-1);
+  file_seek (f, position);
 }
 
 /* Report current position in a file. */
 static unsigned
 sys_tell (int fd)
 {
-  // TO DO:
+  struct file *f;
+
+  f = file_by_fid (fd);
+  if (!f)
+    sys_exit (-1);
+  return file_tell (f); 
 }
 
 /* Close a file. */
 static void
 sys_close (int fd)
 {
-  // TO DO:
+  struct file *f;
+
+  f = file_by_fid_in_thread (fd);     
+
+  if (f == NULL)
+    sys_exit (-1);
+  
+  list_remove (&f->file_elem);
+  list_remove (&f->thread_elem);
+  file_close (f);
 }
 
 static fid_t
@@ -299,6 +318,25 @@ file_by_fid (fid_t fid)
   return NULL;
 }
  
+/* Returns the file with the given fid from the thread files */
+static struct file *
+file_by_fid_in_thread (int fid)
+{
+  struct list_elem *e;
+  struct thread *t;
+
+  t = thread_current();
+  for (e = list_begin (&t->files); e != list_end (&t->files); 
+       e = list_next (e))
+    {
+      struct file *f = list_entry (e, struct file, thread_elem);
+      if (f->fid == fid)
+        return f;
+    }
+  
+  return NULL;
+}
+
 static int
 get_user_byte (const uint8_t *uaddr)
 {
