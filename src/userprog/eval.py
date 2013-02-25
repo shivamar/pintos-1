@@ -12,7 +12,7 @@ color_white = "\033[97m"
 cmdline = optparse.OptionParser(add_help_option=False)
 (opts, args) = cmdline.parse_args(sys.argv[1:])
 
-# tests
+# tests name
 tests_name = {}
 tests_name[1] = "Arguments"
 tests_name[2] = "Breaking"
@@ -21,7 +21,9 @@ tests_name[4] = "Process Exec"
 tests_name[5] = "File handling"
 tests_name[6] = "SYS Read & Write"
 tests_name[7] = "Other SYS Calls"
+tests_name[8] = "File System"
 
+# actual tests
 tests = {}
 tests[1] = ["args-dbl-space", "args-many", "args-multiple", "args-none", "args-single"] 
 tests[2] = ["bad-jump", "bad-jump2", "bad-read", "bad-read2", "bad-write", "bad-write2"]
@@ -34,13 +36,17 @@ tests[5] = ["create-bad-ptr", "create-empty", "create-long", "create-null", "cre
 tests[6] = ["read-bad-fd", "read-bad-ptr", "read-boundary", "read-normal", "read-stdout", "read-zero",
     "write-bad-fd", "write-bad-ptr", "write-boundary", "write-normal", "write-stdin", "write-zero"]
 tests[7] = ["sc-bad-arg", "sc-bad-sp", "sc-boundary-2", "sc-boundary", "multi-recurse", "multi-child-fd", "halt", "exit"]
-
-class stats:
-    total = 0
-    ok = 0
+tests[8] = ["lg-create", "lg-seq-random", "sm-seq-block", "syn-write", "lg-full", "sm-create", "sm-seq-random",
+    "lg-random", "sm-full", "syn-read", "lg-seq-block", "sm-random", "syn-remove"]
 
 # path to tests
-path = 'build/tests/userprog/'
+paths = {}
+for x in xrange(1, 8):
+    paths[x] = 'build/tests/userprog/'
+paths[8] = 'build/tests/filesys/base/'
+
+class stats:
+    total = ok = 0
 
 def run_process(name):
     return subprocess.Popen([name], shell=True, stdout = subprocess.PIPE, stderr = subprocess.STDOUT).communicate()[0]
@@ -79,7 +85,7 @@ def grade(output, test_name, debug):
     return 0
 
 # run tests
-def test(tests, name, debug):
+def test(path, tests, name, debug):
     count = 0
     print ''
     for test_name in tests:
@@ -140,7 +146,7 @@ if __name__ == '__main__':
             continue
 
         elif case >= 1 and case <= len(tests):
-            test(tests[case], tests_name[case], debug)
+            test(paths[case], tests[case], tests_name[case], debug)
 
         else:
             help()

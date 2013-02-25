@@ -15,6 +15,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/palloc.h"
+#include "threads/malloc.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
@@ -30,7 +31,6 @@ process_execute (const char *file_name)
 {
   char *fn_copy;
   char *fn_copy_2;
-  char *name;
   char *save_ptr;
   tid_t tid;
   struct thread *t;
@@ -42,14 +42,14 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  fn_copy_2 = palloc_get_page (0);
+  fn_copy_2 = malloc ( strlen (file_name) + 1);
   if (fn_copy_2 == NULL)
     return TID_ERROR;
-  strlcpy (fn_copy_2, file_name, PGSIZE);
-  name = strtok_r (fn_copy_2, " ", &save_ptr);
-    
+  memcpy (fn_copy_2, file_name, strlen (file_name) + 1);
+  file_name = strtok_r (fn_copy_2, " ", &save_ptr);
+
   /* Create a new thread to execute FILE_NAME. */
-  tid = thread_create (name, PRI_DEFAULT, start_process, fn_copy);
+  tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
   if (tid == TID_ERROR)
   {
     palloc_free_page (fn_copy); 
@@ -72,13 +72,13 @@ start_process (void *file_name_)
   char *file_name = file_name_;
   struct intr_frame if_;
   bool success;
+  struct thread *cur;
   char *save_ptr;
   char *token;
   int i, j;
   int argc = 0;
   void* stack_pointer;
   char* argv[100];
-  struct thread *cur;
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -90,7 +90,7 @@ start_process (void *file_name_)
   token = strtok_r (file_name, " ", &save_ptr);
 
   success = load (file_name, &if_.eip, &if_.esp);
-  
+
   stack_pointer = if_.esp;
 
   /* Tokenise String and push each token on the stack. */
@@ -155,7 +155,7 @@ start_process (void *file_name_)
     sema_up (&cur->sema_wait);
     thread_exit ();
   }
-   
+
   /* If load failed, quit. */
   palloc_free_page (file_name);
 
@@ -191,8 +191,6 @@ process_wait (tid_t child_tid)
   else if (t->ret_status != RET_STATUS_INIT || t->exited == true)
     return t->ret_status;
  
-  //printf ("[PRO_WAIT] wait for %s(%d) from %s\n", t->name, child_tid, cur->name);
- 
   sema_down (&t->sema_wait);
   int ret = t->ret_status;
   sema_up (&t->sema_exit);
@@ -219,8 +217,6 @@ process_exit (void)
   cur->exited = true;
   if (cur->parent != NULL)
     sema_down (&cur->sema_exit); 
-
-  //printf ("[PRO_EXIT] exit for %s with %d\n", cur->name, cur->ret_status);
 
   /* Destroy the current process's page directory and switch back
      to the kernel-only page directory. */
