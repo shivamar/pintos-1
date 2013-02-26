@@ -42,19 +42,23 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  fn_copy_2 = malloc ( strlen (file_name) + 1);
+  fn_copy_2 = palloc_get_page (0);
   if (fn_copy_2 == NULL)
-    return TID_ERROR;
-  memcpy (fn_copy_2, file_name, strlen (file_name) + 1);
+    {
+      palloc_free_page (fn_copy);
+      return TID_ERROR;
+    }
+  strlcpy (fn_copy_2, file_name, PGSIZE);
   file_name = strtok_r (fn_copy_2, " ", &save_ptr);
 
-  /* Create a new thread to execute FILE_NAME. */
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
+  palloc_free_page (fn_copy_2);
+    
   if (tid == TID_ERROR)
-  {
-    palloc_free_page (fn_copy); 
-    return tid;
-  }
+    {
+      palloc_free_page (fn_copy);
+      return tid;
+    }
 
   t = thread_by_tid (tid);
   sema_down (&t->sema_wait);
@@ -151,12 +155,15 @@ start_process (void *file_name_)
   }
   else
   {
+    /* If load failed, quit. */
+    palloc_free_page (file_name);
+
     cur->ret_status = RET_STATUS_ERROR;
     sema_up (&cur->sema_wait);
     thread_exit ();
   }
 
-  /* If load failed, quit. */
+  /* Free memory */
   palloc_free_page (file_name);
 
   /* Start the user process by simulating a return from an

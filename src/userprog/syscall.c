@@ -9,7 +9,6 @@
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "threads/palloc.h"
-#include "threads/malloc.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include <stdio.h>
@@ -171,9 +170,11 @@ sys_open (const char *file)
   if (f == NULL)
     return -1;
 
+  lock_acquire (&file_lock);
   f->fid = allocate_fid ();
   list_push_back (&file_list, &f->file_elem);
   list_push_back (&thread_current ()->files, &f->thread_elem);
+  lock_release (&file_lock);
 
   return f->fid;
 }
@@ -185,10 +186,12 @@ sys_filesize (int fd)
   struct file *f;
   int size = -1;  
 
-  lock_acquire (&file_lock);
   f = file_by_fid (fd);
-  if (f != NULL)
-    size = file_length (f);  
+  if (f == NULL)
+    return -1;
+
+  lock_acquire (&file_lock);
+  size = file_length (f);  
   lock_release (&file_lock);
 
   return size;
@@ -268,10 +271,11 @@ sys_seek (int fd, unsigned position)
 {
   struct file *f;
 
-  lock_acquire (&file_lock);
   f = file_by_fid (fd);
   if (!f)
     sys_exit (-1);
+
+  lock_acquire (&file_lock);
   file_seek (f, position);
   lock_release (&file_lock);
 }
@@ -283,10 +287,11 @@ sys_tell (int fd)
   struct file *f;
   unsigned status;
 
-  lock_acquire (&file_lock);
   f = file_by_fid (fd);
   if (!f)
     sys_exit (-1);
+  
+  lock_acquire (&file_lock);
   status = file_tell (f); 
   lock_release (&file_lock);
   
@@ -304,9 +309,11 @@ sys_close (int fd)
   if (f == NULL)
     sys_exit (-1);
   
+  lock_acquire (&file_lock);
   list_remove (&f->file_elem);
   list_remove (&f->thread_elem);
   file_close (f);
+  lock_release (&file_lock);
 }
 
 static fid_t
