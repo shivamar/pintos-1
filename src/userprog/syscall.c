@@ -112,6 +112,9 @@ sys_exit (int status)
   struct list_elem *e;    
 
   t = thread_current ();
+  if (lock_held_by_current_thread (&file_lock) )
+    lock_release (&file_lock);
+
   while (!list_empty (&t->files) )
     {
       e = list_begin (&t->files);
