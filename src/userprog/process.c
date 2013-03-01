@@ -79,10 +79,9 @@ start_process (void *file_name_)
   struct thread *cur;
   char *save_ptr;
   char *token;
-  int i, j;
+  int args_pushed;
   int argc = 0;
   void* stack_pointer;
-  char* argv[100];
 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
@@ -97,22 +96,18 @@ start_process (void *file_name_)
 
   stack_pointer = if_.esp;
 
-  /* Tokenise String and push each token on the stack. */
-    do
-    {
-      argv[argc] = token;
-      argc++;
-      token = strtok_r (NULL, " ", &save_ptr);
-    } while (token != NULL);
-
-    for (j = argc - 1; j >= 0; --j)
-      {
-        size_t len = strlen (argv[j]) + 1;
-        stack_pointer = (void*) (((char*) stack_pointer) - len);
-        strlcpy ((char*)stack_pointer, argv[j], len);
-        argv[j] = (char*) stack_pointer;
-      }
-
+  /* Tokenise file name and push each token on the stack. */
+  do                                                                            
+     {                                                                           
+       size_t len = strlen (token) + 1;                                          
+       stack_pointer = (void*) (((char*) stack_pointer) - len);                  
+       strlcpy ((char*)stack_pointer, token, len);                               
+       argc++;                                                                   
+       token = strtok_r (NULL, " ", &save_ptr);                                  
+     } while (token != NULL);
+  
+  char *arg_ptr = (char*) stack_pointer;                                      
+  
   /* Round stack pionter down to a multiple of 4. */
   stack_pointer = (void*) (((intptr_t) stack_pointer) & 0xfffffffc);
 
@@ -121,11 +116,16 @@ start_process (void *file_name_)
   *((char*)(stack_pointer)) = 0;
 
   /* Push pointers to arguments. */
-  for (i = argc - 1; i >= 0; --i)
-    {
-      stack_pointer = (((char**) stack_pointer) - 1);
-      *((char**) stack_pointer) = argv[i];
-    }
+  args_pushed = 0;                                                              
+  while (args_pushed < argc)                                                    
+     {                                                                           
+       while (*(arg_ptr - 1) != '\0')                                            
+         ++arg_ptr;                                                              
+       stack_pointer = (((char**) stack_pointer) - 1);                           
+       *((char**) stack_pointer) = arg_ptr;                                      
+       ++args_pushed;    
+       ++arg_ptr;                                                        
+     }
 
   /* Push argv. */
   char** first_arg_pointer = (char**) stack_pointer;
