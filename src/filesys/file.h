@@ -1,27 +1,9 @@
 #ifndef FILESYS_FILE_H
 #define FILESYS_FILE_H
 
-#include <list.h>
 #include "filesys/off_t.h"
 
-typedef int fid_t;
-
 struct inode;
-
-/* An open file. */
-struct file
-  {
-    struct inode *inode;            /* File's inode. */
-    off_t pos;                      /* Current position. */
-    bool deny_write;                /* Has file_deny_write() been called? */
-
-#ifdef USERPROG
-    /* Owned by userprog/syscall.c */
-    fid_t fid;                      /* File identifier */
-    struct list_elem file_elem;     /* List elem for file list */
-    struct list_elem thread_elem;   /* List elem for a thread's file list */
-#endif
-  };
 
 /* Opening and closing files. */
 struct file *file_open (struct inode *);

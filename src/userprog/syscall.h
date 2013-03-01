@@ -3,6 +3,6 @@
 
 void syscall_init (void);
 /* memory test */
-void sys_exit (int status);
+void sys_t_exit (int status);
 
 #endif /* userprog/syscall.h */
