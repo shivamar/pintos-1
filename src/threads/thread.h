@@ -128,7 +128,7 @@ struct thread
     struct list children;               /* A list of children process */
     struct list_elem child_elem;        /* List elem for children list */
     int ret_status;                     /* Return status. */
-    bool exited;                        /* If the proccess exited? */
+    bool exited;                        /* If the process exited? */
     bool waited;                        /* If parent thread has called wait */
 #endif
 

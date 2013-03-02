@@ -8,9 +8,9 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
-FirstName LastName <email@domain.example>
+FirstName LastName <iv511@imperial.ac.uk>
+FirstName LastName <aba111@imperial.ac.uk>
+FirstName LastName <pjr11@imperial.ac.uk>
 
 ---- PRELIMINARIES ----
 
@@ -53,15 +53,98 @@ FirstName LastName <email@domain.example>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+/* Process identifier. */
+typedef int pid_t;
+/* File identifier. */
+typedef int fid_t;
+
+/* Static sys calls definitions */
+static void      sys_halt (void);
+static void      sys_exit (int status);
+static pid_t     sys_exec (const char *file);
+static int       sys_wait (pid_t pid);
+static bool      sys_create (const char *file, unsigned initial_size);
+static bool      sys_remove (const char *file);
+static int       sys_open (const char *file);
+static int       sys_filesize (int fd);
+static int       sys_read (int fd, void *buffer, unsigned size);
+static int       sys_write (int fd, const void *buffer, unsigned size);
+static void      sys_seek (int fd, unsigned position);
+static unsigned  sys_tell (int fd);
+static void      sys_close (int fd);
+
+/* Additional data to hold a file identifier and a thread elem for each thread file list
+struct user_file
+  {
+    struct file *file;                 /* Pointer to the actual file */
+    fid_t fid;                         /* File identifier */
+    struct list_elem thread_elem;      /* List elem for a thread's file list */
+  };
+*/
+
+/* Get a pointer to a user file from a thread's list */
+static struct user_file *file_by_fid (fid_t);
+
+/* Allocates a new fid by using a static variable */
+static fid_t allocate_fid (void);
+
+/* Lock to ensure synchronization on file operations */
+static struct lock file_lock;
+
+/* The generic system call argument can replace any sys call function
+ signature */
+typedef int (*handler) (uint32_t, uint32_t, uint32_t);
+
+/* An array to map every sys call function to its unique identifier 
+from syscall-nr.h. After the initial mapping we can get the required
+function to call in just one line. */
+static handler syscall_map[32];
+
+/* Added to structure thread */
+struct thread 
+  {
+    ...
+#ifdef USERPROG
+    /* Owned by userprog/process.c. */
+    uint32_t *pagedir;                  /* Page directory. */
+    struct semaphore sema_wait;         /* Semaphore for process_wait. */
+    struct semaphore sema_exit;         /* Semaphore for process_exit. */
+    struct thread *parent;              /* The parent of the thread */
+    struct file *exec;                  /* The file containing the thread executable */
+    struct list files;                  /* A list of open files */
+    struct list children;               /* A list of children process */
+    struct list_elem child_elem;        /* List elem for children list */
+    int ret_status;                     /* Return status. */
+    bool exited;                        /* If the process exited? */
+    bool waited;                        /* If parent thread has called wait */
+#endif
+    ...
+}
+
 >> B2: Describe how file descriptors are associated with open files.
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
+
+We created a static function allocate_fid based on the same logic as 
+allocate_tid from thread.c. Inside the function we have a static counter
+variable that gets incremented each time we need a new file descriptor.
+This is the easiest way to get a unique fid and there no point in having
+the same file descriptor for different processes. 
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
 
+As we were advised in the specification, for each access we only check if
+the address is in the user space. When we have strings to read or write it's
+enough to verify whether the start and the end addresses are bellow PYS_BASE. On 
+each system call function we check that all the arguments are in user space.
+If we have an invalid pointer or an unmapped page we check it in the page fault
+handler and kill the running process. This approach seems to be faster as it
+takes advantage of the processor's MMU. In the page fault handler we continue 
+to trigger a page fault only in the case of a kernel signal.  
+ 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
 >> and the greatest possible number of inspections of the page table
@@ -69,8 +152,48 @@ FirstName LastName <email@domain.example>
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+First we have to consider the number of calls used to set up the stack and load
+the segments of the program. For these operations we always have 4 inspections
+because for each user page we make an alias to a kernel page. 
+
+After the initialization step that number only depends if the data spans 
+over one or two pages. We check for each page once, so the least number for 
+4,096 bytes is 1 function call and the greatest is 2. If we want to write only 2 
+bytes the situation is similar and could still result in 2 page checks if we 
+have a byte on each page. 
+
+One way to improve these numbers is by loading the segments of the program in a
+lazy manner. So if we have an invalid access we don't have to load all the pages
+in advance. However this doesn't bring any advantage in the average case when 
+all accesses are valid. 
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+To implement the "wait" system call we added some extra fields in the structure
+of a thread like a list of children and a reference to its parent. Also each
+thread has a ret_status field that is initialized with a default status and 
+it's changed on the exit system call or if an error results during loading.
+We also keep track if the process has waited and wherever it's alive.
+
+When the "wait" system call is called we start process_wait. First we get the 
+thread with the corresponding tid from the all threads list. If we don't find 
+the thread, the child thread has a different parent or we have already waited 
+for it we just return an error. 
+
+The second case is when the child thread has finished its job and waits before 
+exiting, knowing there is still a parent that might call wait. Then we simply 
+return the child final status and continue. Note that even if a child has 
+already exited it still remains to wait on semaphore, down until his parent has
+exited, before freeing its thread structure so we can still get its return 
+status.
+
+The last case is when the child thread is still running so we put the current 
+thread to wait with down on sema_wait semaphore paired up called when the child 
+thread exits. We use two paired semaphore for exit and for wait to assure the 
+synchronization works as expected in all cases. So we ensured that when a child 
+exits it will allow the waiting parent to get its return status and after wait 
+for its parent to exit before freeing the thread structure.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -86,12 +209,52 @@ FirstName LastName <email@domain.example>
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+We have two ways to protect a system call from an invalid access. First we check
+in the system call handler, before actually initiating the call, that all the 
+parameters are in user space as described above. In the case of write or read 
+sys calls we also check the buffer spans in user space. On file handling calls
+we check that the file is owned by the current thread and use a file lock to 
+synchronize access. Secondly, we modified the page fault handle to find an
+invalid access or an unmapped page. All these check will result in the process
+begin terminated by following the exit sys call. 
+
+In the sys exit call we make sure that any resources held by the current process
+are freed. First we release the file lock if an error occurred during a file 
+access. After that we iterate over all its opened files, free the user file
+structure and remove it from its thread file list. Then the function calls 
+thread exit. Here we perform a semaphore up on all thread's children and clear 
+the children list. After that we call process exit which will first wait if 
+necessary for its parent and clear all the waiters threads. Finally we 
+switch page directories and free its own page directory.
+
+For example we could experience a bad pointer value during the write system 
+call. This will be captured in the initial checks or in the page fault handler.
+In either case we will call sys exit, thread exit and then process execute. As 
+described above this logic will clear all children mappings and free all the 
+process resources including all the files, locks, semaphores, page directory 
+and structure thread.
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+We are using a semaphore to ensure synchronization between the parent and the
+child process. After the child thread is created we perform a semaphore down
+operation on the parent until the child calls semaphore up when loading has 
+finished. In case of an unsuccessful load the child return status is set to 
+error before the semaphore operation awakes the parent. Therefore the parent 
+thread will know before returning from exec if the child started successfully 
+and returns as required a valid tid or -1.
+
+We were able to use the same semaphore from process wait to minimize the memory
+occupied by the structure thread. Because the child only performs a semaphore 
+up when loading or exiting the parent can accordingly wait for loading or for 
+the actual system "wait" call. The load and exit semaphore up operations always 
+happen in this order even in the case of an unsuccessful load, so any possible 
+race condition in the parent thread is avoided. 
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -100,16 +263,38 @@ FirstName LastName <email@domain.example>
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+TO DO:
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+TO DO:
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
 
+In our implementations each process maintains a list of opened user files each of
+them with a unique fid. 
+
+The advantages are that we don't have to search through all files to see if a
+file is owned by the current thread. Also we can obtain fast the list of all
+files for a thread. In terms of memory is also quite efficient because we have
+to store besides the opened file and its corresponding fid, only a pointer to
+its structure per thread. 
+
+A disadvantage to our approach is that we have to iterate through all the files
+of a thread on each operation, but this is not a big issue as this list is 
+typically small. We considered also other approaches like maintaining an array 
+to have access but that would result in a waste of memory and a limited number 
+of opened files. 
+
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
+
+We used the default implementation for the purpose of clarity and we couldn't
+find any major advantage in creating an auxiliary mapping. 
 
                SURVEY QUESTIONS
                ================
