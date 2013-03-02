@@ -263,14 +263,50 @@ race condition in the parent thread is avoided.
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
-TO DO:
+When the parent process P calls wait on child process C before C exits, we put
+the current thread to wait on 'sema_wait' semaphore down. When C exits it will
+perform semaphore up and release the parent thread. In order to ensure proper
+synchronization and avoid race conditions, we used two semaphores for wait
+and exit. Therefore, when process C exits it will allow P to get its return
+status and it will then wait for P to exit before freeing the thread structure.
+
+In the case when a child thread has finished its job and enteres the process
+exit function, it will remain to wait on the semaphore down, until its parent
+has exited, before freeing its thread structure in order to allow the parent
+to still get its return status.
+
+When P terminates without waiting, before C exits, C will put sema_up on
+semaphore 'sema_wait' and it will not wait on sema_down for sema_exit, as
+P has already given up the semaphore when it finished. When P terminates
+without waiting, after C exits, C will wait until P finished before freeing
+the thread structure.
+
+As explained above in B6 this logic will free all the resources held by
+the process and thread in process_exit and thread_exit respectively.
+
+A special case is the initial thread, the one running the kernel. All its
+children won't wait for it because the kernel thread won't use a exit system
+call.
 
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
-TO DO:
+To access user memory from the kernel we use the function is_user_vaddr,
+which verifies for each access if the address is in the user space. In
+the case of the system calls that require memory like read and write, it's
+enough to check if the start and end address are below PHYS_BASE. For the
+rest of the system calls we check if the arguments are inside the user space.
+In the case of an invalid pointer or an unmapped page we check it in the
+page_fault handler and kill the running process. We continue to trigger a page
+fault in the page fault handler only in the case of a kernel signal.
+
+We chose to implement it in this way because of simplicity and unity. This
+approach also seems to be faster as it takes advantage of the processor's MMU.
+Another advantage is that it potentially reduces the resource waste. For each
+call we check the address provided and if it is not valid the process will be
+killed instead of letting it execute for some time.
 
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
