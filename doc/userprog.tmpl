@@ -8,9 +8,9 @@
 
 >> Fill in the names and email addresses of your group members.
 
-FirstName LastName <iv511@imperial.ac.uk>
-FirstName LastName <aba111@imperial.ac.uk>
-FirstName LastName <pjr11@imperial.ac.uk>
+Irina-Elena Veliche <irina-elena.veliche11@imperial.ac.uk>
+Paul Rowe-White <paul.rowe-white11@imperial.ac.uk>
+Andrei Bogdan Antonescu <andrei.antonescu11@imperial.ac.uk>
 
 ---- PRELIMINARIES ----
 
@@ -30,19 +30,78 @@ FirstName LastName <pjr11@imperial.ac.uk>
 >> `struct' member, global or static variable, `typedef', or
 >> enumeration.  Identify the purpose of each in 25 words or less.
 
+None.
+
 ---- ALGORITHMS ----
 
 >> A2: Briefly describe how you implemented argument parsing.  How do
 >> you arrange for the elements of argv[] to be in the right order?
 >> How do you avoid overflowing the stack page?
 
+In process_execute() two copies of the file name that is passed in are made.
+This is beacuse the file name passed in is const and includes the program
+arguments. One copy of the file name including arguments is tokenised to
+extract just the file name and then this is passed into thread_create() as the 
+file name to run. The other copy is not modified and just passed through to
+thread_create() as the argument to be given to the start_process function.
+ 
+In start_process() the string of the file name and all of the arguments is
+tokenised to extract the file name and then this is passed to the load
+function. Once this is complete, set_up_user_prog_stack() is called to set up
+the stack. In this functionm the file name is put on the thread's stack by 
+moving the stack pointer down by the length of the string including the NULL 
+byte and the number of arguments is incremented. strtok_r is then called again 
+and the same process is done for each of the arguments so the arguments are on 
+the stack in the order they were in the original string. The stack pointer is 
+then saved so there is a pointer to the last argument to be used later. The 
+stack pointer is then rounded down to a multiple of 4 and the NULL sentinel is 
+pushed onto the stack. Now the pointers to the arguments (elements of argv) 
+need to be pushed on the stack in reverse order. To do this the saved pointer 
+to the last argument is used to walk back down the stack independantly from the
+current stack pointer which still points to the top of the stack. Whenever a 
+NULL byte is found, a pointer to the character below it on the stack is pushed
+on the top of the stack as this is a pointer to the start character of the next 
+argument string. This is done until the number of pointers pushed is the same as
+the number of arguments, so all argument pointers are pushed. Thus the pointers
+are pushed in the reverse order to the order in which the argument strings were 
+pushed and so they are in the order required (reverse order to the order in the
+original string.
+
+To avoid overflowing the stack, as each argument is pushed the difference
+between PHYS_BASE and the current stack pointer is evaluated. If this is
+greater than 4096 bytes then no more arguments are pushed on the stack and the
+process exits. This limit was chosen so that all arguments will fit in a simple
+page of memory.
+
 ---- RATIONALE ----
 
 >> A3: Why does Pintos implement strtok_r() but not strtok()?
 
+strtok() and strtok_r() are both functions for tokenising strings. Both take a
+string to be tokenised and a string of delimiters. However strtok_r() takes an
+extra argument that maintains the current position in the string to tokenise
+between calls. strtok() does not take this argument as it uses a global static
+buffer so it is not thread safe as if threads calling strtok() are interleaved
+the both will try to write to the global buffer and so will corrupt the buffer
+for the other running threads. strtok_r() is thread safe so this is used in
+Pintos as threads can be interleaved.
+
 >> A4: In Pintos, the kernel separates commands into a executable name
 >> and arguments.  In Unix-like systems, the shell does this
 >> separation.  Identify at least two advantages of the Unix approach.
+
+The shell can have aliases for executable names eg. just typing the name without
+the full path to it or the full path in stored in the PATH variable for
+convenience. The shell can then expand the path to the executable before passing
+it onto the kernel. This saves the user from having to type the full path
+for a command everytime it is run.
+ 
+The shell can also support multiple commands on one line, passing the output of
+one command as an argument to the next. The shell can do
+this as it can split each of the commands into the execuatable name and
+arguments and then run one after the other, passing the output as an argument.
+Passing the same string to the kernel could make it try to execute the first
+command and the second command would be treated as an argument to the first.
 
                  SYSTEM CALLS
                  ============

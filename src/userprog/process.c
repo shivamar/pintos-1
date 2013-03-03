@@ -19,9 +19,12 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 
+#define MAX_ARGS_SIZE 4096
+
 static thread_func start_process NO_RETURN;
 static bool load (const char *cmdline, void (**eip) (void), void **esp);
-
+static int set_up_user_prog_stack (void **esp, char **save_ptr, char *token);
+ 
 /* Starts a new thread running a user program loaded from
    FILENAME.  The new thread may be scheduled (and may even exit)
    before process_execute() returns.  Returns the new process's
@@ -79,10 +82,8 @@ start_process (void *file_name_)
   struct thread *cur;
   char *save_ptr;
   char *token;
-  int args_pushed;
-  int argc = 0;
-  void* stack_pointer;
-
+  int stack_ok;
+ 
   /* Initialize interrupt frame and load executable. */
   memset (&if_, 0, sizeof if_);
   if_.gs = if_.fs = if_.es = if_.ds = if_.ss = SEL_UDSEG;
@@ -93,8 +94,50 @@ start_process (void *file_name_)
   token = strtok_r (file_name, " ", &save_ptr);
 
   success = load (file_name, &if_.eip, &if_.esp);
+  
+  /* Set up the stack for the user program. */
+  stack_ok = set_up_user_prog_stack (&if_.esp, &save_ptr, token);
 
-  stack_pointer = if_.esp;
+  cur = thread_current();
+
+  if (success && stack_ok) 
+  {
+    cur->exec = filesys_open (file_name);
+    file_deny_write ( cur->exec );
+    sema_up (&cur->sema_wait);
+  }
+  else
+  {
+    /* If load failed, quit. */
+    palloc_free_page (file_name);
+
+    cur->ret_status = RET_STATUS_ERROR;
+    sema_up (&cur->sema_wait);
+    thread_exit ();
+  }
+
+  /* Free memory */
+  palloc_free_page (file_name);
+
+  /* Start the user process by simulating a return from an
+     interrupt, implemented by intr_exit (in
+     threads/intr-stubs.S).  Because intr_exit takes all of its
+     arguments on the stack in the form of a `struct intr_frame',
+     we just point the stack pointer (%esp) to our stack frame
+     and jump to it. */
+  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
+  NOT_REACHED ();
+}
+
+/* Sets up the stack for the user program, returns 1 on success, 0 if the
+   arguments won't fit on the stack */
+static int
+set_up_user_prog_stack (void **esp, char **save_ptr, char* token) {
+  int args_pushed;
+  int argc = 0;
+  void* stack_pointer;
+
+  stack_pointer = *esp;
 
   /* Tokenise file name and push each token on the stack. */
   do                                                                            
@@ -102,8 +145,12 @@ start_process (void *file_name_)
        size_t len = strlen (token) + 1;                                          
        stack_pointer = (void*) (((char*) stack_pointer) - len);                  
        strlcpy ((char*)stack_pointer, token, len);                               
-       argc++;                                                                   
-       token = strtok_r (NULL, " ", &save_ptr);                                  
+       argc++;                                   
+       /* Don't push anymore arguments if maximum allowed 
+          have already been pushed. */
+       if (PHYS_BASE - stack_pointer > MAX_ARGS_SIZE)
+          return 0;                              
+       token = strtok_r (NULL, " ", save_ptr);                                  
      } while (token != NULL);
   
   char *arg_ptr = (char*) stack_pointer;                                      
@@ -143,37 +190,8 @@ start_process (void *file_name_)
   stack_pointer = (((void**) stack_pointer) - 1);
   *((void**)(stack_pointer)) = 0;
 
-  if_.esp = stack_pointer;
-
-  cur = thread_current();
-
-  if (success) 
-  {
-    cur->exec = filesys_open (file_name);
-    file_deny_write ( cur->exec );
-    sema_up (&cur->sema_wait);
-  }
-  else
-  {
-    /* If load failed, quit. */
-    palloc_free_page (file_name);
-
-    cur->ret_status = RET_STATUS_ERROR;
-    sema_up (&cur->sema_wait);
-    thread_exit ();
-  }
-
-  /* Free memory */
-  palloc_free_page (file_name);
-
-  /* Start the user process by simulating a return from an
-     interrupt, implemented by intr_exit (in
-     threads/intr-stubs.S).  Because intr_exit takes all of its
-     arguments on the stack in the form of a `struct intr_frame',
-     we just point the stack pointer (%esp) to our stack frame
-     and jump to it. */
-  asm volatile ("movl %0, %%esp; jmp intr_exit" : : "g" (&if_) : "memory");
-  NOT_REACHED ();
+  *esp = stack_pointer;
+  return 1;
 }
 
 /* Waits for thread TID to die and returns its exit status.  If
