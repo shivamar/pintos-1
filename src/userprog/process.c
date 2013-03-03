@@ -45,7 +45,8 @@ process_execute (const char *file_name)
     return TID_ERROR;
   strlcpy (fn_copy, file_name, PGSIZE);
 
-  fn_copy_2 = palloc_get_page (0);
+  /* Use malloc as we only need a few bytes, not a whole page. */
+  fn_copy_2 = malloc ( strlen(file_name) + 1);
   if (fn_copy_2 == NULL)
     {
       palloc_free_page (fn_copy);
@@ -55,7 +56,7 @@ process_execute (const char *file_name)
   file_name = strtok_r (fn_copy_2, " ", &save_ptr);
 
   tid = thread_create (file_name, PRI_DEFAULT, start_process, fn_copy);
-  palloc_free_page (fn_copy_2);
+  free (fn_copy_2);
     
   if (tid == TID_ERROR)
     {
