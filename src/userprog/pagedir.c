@@ -5,6 +5,7 @@
 #include "threads/init.h"
 #include "threads/pte.h"
 #include "threads/palloc.h"
+#include "vm/frame.h"
 
 static uint32_t *active_pd (void);
 static void invalidate_pagedir (uint32_t *);
@@ -41,10 +42,10 @@ pagedir_destroy (uint32_t *pd)
         
         for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
           if (*pte & PTE_P) 
-            palloc_free_page (pte_get_page (*pte));
-        palloc_free_page (pt);
+            vm_free_frame (pte_get_page (*pte));
+        vm_free_frame (pt);
       }
-  palloc_free_page (pd);
+  vm_free_frame (pd);
 }
 
 /* Returns the address of the page table entry for virtual
@@ -112,6 +113,11 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
     {
       ASSERT ((*pte & PTE_P) == 0);
       *pte = pte_create_user (kpage, writable);
+
+      /* Create a mapping from the user virtual page UPAGE 
+         to the vm_frame identified as KPAGE.
+         TO DO: check for failure. */
+      vm_frame_create_user (kpage, pte, upage);
       return true;
     }
   else
