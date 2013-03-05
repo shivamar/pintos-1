@@ -19,6 +19,7 @@
 #include "threads/thread.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/page.h"
 
 #define MAX_ARGS_SIZE 4096
 
@@ -465,6 +466,7 @@ load (const char *file_name, void (**eip) (void), void **esp)
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
+static bool install_vm_page (void *upage, void *kpage);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -511,6 +513,8 @@ validate_segment (const struct Elf32_Phdr *phdr, struct file *file)
   return true;
 }
 
+int test = 0;
+
 /* Loads a segment starting at offset OFS in FILE at address
    UPAGE.  In total, READ_BYTES + ZERO_BYTES bytes of virtual
    memory are initialized, as follows:
@@ -533,7 +537,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (pg_ofs (upage) == 0);
   ASSERT (ofs % PGSIZE == 0);
 
-  file_seek (file, ofs);
+  off_t load_ofs = ofs;
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Calculate how to fill this page.
@@ -542,12 +546,16 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
+      //printf ("[Load segemnt] rb=%d zb=%d writable=%d page=%d\n", page_read_bytes, page_zero_bytes, writable, upage); 
+
+#ifdef NORMAL_LOAD
       /* Get a page of memory. */
       uint8_t *kpage = vm_get_frame (PAL_USER);
       if (kpage == NULL)
         return false;
 
       /* Load this page. */
+      file_seek (file, ofs);
       if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
         {
           vm_free_frame (kpage);
@@ -561,12 +569,25 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           vm_free_frame (kpage);
           return false; 
         }
+#endif
+
+      struct vm_page *kpage = NULL;
+      kpage = vm_new_file_page (upage, file, load_ofs, page_read_bytes, 
+                                page_zero_bytes, writable);
+      if (kpage == NULL)
+        {
+          vm_free_page (kpage);
+          return false;
+        }     
 
       /* Advance. */
       read_bytes -= page_read_bytes;
       zero_bytes -= page_zero_bytes;
       upage += PGSIZE;
+      load_ofs += PGSIZE;
     }
+  file_seek (file, ofs); 
+
   return true;
 }
 
@@ -575,19 +596,22 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 static bool
 setup_stack (void **esp) 
 {
-  uint8_t *kpage;
-  bool success = false;
+  struct vm_page *kpage = NULL;
+  struct thread *t;
 
-  kpage = vm_get_frame (PAL_USER | PAL_ZERO);
-  if (kpage != NULL) 
+  kpage = vm_new_zero_page (((uint8_t *) PHYS_BASE) - PGSIZE, true); 
+
+  if (kpage == NULL)
     {
-      success = install_page (((uint8_t *) PHYS_BASE) - PGSIZE, kpage, true);
-      if (success)
-        *esp = PHYS_BASE;
-      else
-        vm_free_frame (kpage);
+      vm_free_page (kpage);
+      return false;
     }
-  return success;
+  
+  *esp = PHYS_BASE;
+  t = thread_current ();
+  vm_load_page (kpage, ((uint8_t *) PHYS_BASE) - PGSIZE, t->pagedir);  
+
+  return true;
 }
 
 /* Adds a mapping from user virtual address UPAGE to kernel

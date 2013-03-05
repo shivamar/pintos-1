@@ -3,9 +3,12 @@
 #include <stdio.h>
 #include "userprog/gdt.h"
 #include "threads/interrupt.h"
+#include "threads/pte.h"
 #include "threads/thread.h"
 #include "threads/vaddr.h"
+#include "userprog/pagedir.h"
 #include "userprog/syscall.h"
+#include "vm/page.h"
 
 /* Number of page faults processed. */
 static long long page_fault_cnt;
@@ -128,6 +131,9 @@ page_fault (struct intr_frame *f)
   bool write;        /* True: access was write, false: access was read. */
   bool user;         /* True: access by user, false: access by kernel. */
   void *fault_addr;  /* Fault address. */
+  void *fault_page;  /* Fault page. */
+  struct vm_page *page;        
+  struct thread *t;
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -150,8 +156,35 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-  if (not_present || user)
+  if (/*not_present ||*/ (user && !is_user_vaddr (fault_addr) ))
     sys_t_exit (-1);
+
+  /* Get the fault page. */
+  fault_page = (void *) (PTE_ADDR & (uint32_t) fault_addr);
+  t = thread_current ();
+
+  //printf ("\n[page fault] at %d in page %d\n", fault_addr, fault_page);
+
+  page = find_page (fault_page);
+  //pagedir_get_page (t->pagedir, fault_page);
+  bool stack_access = fault_addr >= (f->esp - 32) && 
+     (PHYS_BASE - pg_round_down (fault_addr)) <= (1<<20) * 8;  
+
+  // TO DO: check for stack access
+  if (page != NULL)
+    {
+      //printf ("[Page fault load] rb=%d zb=%d writable=%d page=%d\n", page->file_data.read_bytes, page->file_data.zero_bytes, page->file_data.writable, page->addr);
+
+      if ( !vm_load_page (page, fault_page, t->pagedir) )
+        PANIC ("load error");
+      //printf ("[page_fault] Load was ok!\n");
+      return;
+    }
+  else if(page != NULL && stack_access)
+    {
+      vm_grow_stack (fault_addr);
+      return;
+    }
 
   if (!user)
     {
