@@ -156,7 +156,11 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
+<<<<<<< HEAD
   if (/*not_present ||*/ (user && !is_user_vaddr (fault_addr) ))
+=======
+  if (not_present || user)
+>>>>>>> d0d3e25ae9c73889704878c8809e28974b2724b1
     sys_t_exit (-1);
 
   /* Get the fault page. */
