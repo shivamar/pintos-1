@@ -5,24 +5,28 @@
 #include "userprog/syscall.h"
 #include "threads/malloc.h"
 #include "threads/palloc.h"
+#include "threads/thread.h"
 #include "threads/synch.h"
 #include "threads/vaddr.h"
 #include "vm/frame.h"
+#include "vm/swap.h"
 
 static struct lock list_lock;
+static struct lock load_lock;
 static struct list page_list; 
 
 static bool vm_load_file_page (uint8_t *kpage, struct vm_page *page);
 static bool vm_load_swap_page (uint8_t *kpage, struct vm_page *page);
 static bool vm_load_zero_page (uint8_t *kpage);
 
-static bool delete_page (void *addr);
+static bool delete_page (struct vm_page *page);
 static bool add_page (struct vm_page *page);
 
 void
 vm_page_init (void)
 {
   lock_init (&list_lock);
+  lock_init (&load_lock);
   list_init (&page_list);
 }
 
@@ -38,6 +42,7 @@ vm_new_file_page (void *addr, struct file *file, off_t ofs,
 
   page->type = FILE;
   page->addr = addr;
+  page->pagedir = thread_current ()->pagedir;
   page->file_data.file = file;
   page->file_data.ofs = ofs;
   page->file_data.read_bytes = read_bytes;
@@ -49,8 +54,9 @@ vm_new_file_page (void *addr, struct file *file, off_t ofs,
   return page; 
 }
 
+/* Creates a new page from a swap page. (?) */
 struct vm_page*
-vm_new_swap_page (void *addr, bool writable)
+vm_new_swap_page (void *addr, size_t index, bool writable)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
 
@@ -59,13 +65,16 @@ vm_new_swap_page (void *addr, bool writable)
 
   page->type = SWAP;
   page->addr = addr;
+  page->pagedir = thread_current ()->pagedir;
+  page->swap_data.index = index;
   page->writable = writable;
 
-  PANIC ("To do: new swap page");
+  add_page (page);
 
   return page;
 }
 
+/* Creates a new page initialized to zero on loading. */
 struct vm_page*
 vm_new_zero_page (void *addr, bool writable)
 {
@@ -76,7 +85,10 @@ vm_new_zero_page (void *addr, bool writable)
 
   page->type = ZERO;
   page->addr = addr;
+  page->pagedir = thread_current ()->pagedir;
   page->writable = writable;
+  
+  add_page (page);
 
   return page;
 }
@@ -92,7 +104,8 @@ bool
 vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
 {
   /* Get a frame of memory. */
-  uint8_t *kpage = vm_get_frame (PAL_USER);
+  lock_acquire (&load_lock);
+  void *kpage = vm_get_frame (PAL_USER);
   if (kpage == NULL)
     return false;
 
@@ -105,8 +118,11 @@ vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
     success = vm_load_swap_page (kpage, page);
 
   if (!success)
-    return false;
-  
+    {
+      lock_release (&load_lock);
+      return false;
+    }
+
   if (!pagedir_set_page (pagedir, fault_page, kpage, page->writable) )
     {
       PANIC ("Unable to load the page!");
@@ -115,7 +131,19 @@ vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
   pagedir_set_accessed (pagedir, fault_page, true);
   page->loaded = true;
 
+  lock_release (&load_lock);
   return true;
+}
+
+void
+vm_unload_page (struct vm_page *page, void *addr)
+{
+  pagedir_clear_page (page->pagedir, page->addr);
+  page->loaded = false;
+
+  /* Store the page to swap. */
+  page->type = SWAP;
+  page->swap_data.index = vm_swap_store (addr);
 }
 
 static bool
@@ -141,15 +169,15 @@ vm_load_zero_page (uint8_t *kpage)
 {
   /* Fill this page only with zeroes. */
   memset (kpage, 0, PGSIZE);
-  
   return true;
 }
 
 static bool
 vm_load_swap_page (uint8_t *kpage, struct vm_page *page)
 {
-  PANIC ("TO DO: load swap page");
-  return false;
+  vm_swap_load (page->swap_data.index, kpage);
+  vm_swap_free (page->swap_data.index);
+  return true;
 }
 
 bool
@@ -161,9 +189,9 @@ vm_grow_stack (void *fault_addr)
 }
 
 struct vm_page *
-find_page (void *addr)
+find_page (void *addr, uint32_t *pagedir)
 {
-  //printf ("[find page] for adr %d\n", addr);
+  //printf ("[find page] for adr %d in %p\n", addr, pagedir);
 
   struct list_elem *e;
   lock_acquire (&list_lock);
@@ -172,7 +200,7 @@ find_page (void *addr)
        e = list_next(e))
     {
       struct vm_page *page = list_entry (e, struct vm_page, list_elem);
-      if (page->addr == addr)
+      if (page->addr == addr && page->pagedir == pagedir)
         {
           lock_release (&list_lock);
           return page;
@@ -186,7 +214,7 @@ find_page (void *addr)
 static bool
 add_page (struct vm_page *page)
 {
-  //printf ("[add page] for adr %d\n", page->addr);
+  //printf ("\n[add page] for adr %d in %p\n", page->addr, page->pagedir);
 
   lock_acquire (&list_lock);
   list_push_back (&page_list, &page->list_elem);
@@ -196,23 +224,11 @@ add_page (struct vm_page *page)
 }
 
 static bool 
-delete_page (void *addr)
+delete_page (struct vm_page *page)
 {
-  struct list_elem *e;
   lock_acquire (&list_lock);
-
-  for (e = list_begin (&page_list); e != list_end (&page_list); 
-       e = list_next(e))
-    {
-      struct vm_page *page = list_entry (e, struct vm_page, list_elem);
-      if (page->addr == addr)
-        {
-          list_remove (&page->list_elem);
-          lock_release (&list_lock);
-          return true;
-        }
-    }
-
+  list_remove (&page->list_elem);
+  free (page);
   lock_release (&list_lock);
-  return false;
+  return true;
 }

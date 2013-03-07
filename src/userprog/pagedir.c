@@ -117,7 +117,7 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
       /* Create a mapping from the user virtual page UPAGE 
          to the vm_frame identified as KPAGE.
          TO DO: check for failure. */
-      vm_frame_create_user (kpage, pte, upage);
+      vm_frame_add_page (kpage, upage, pd);
       return true;
     }
   else

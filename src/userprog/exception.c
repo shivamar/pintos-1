@@ -156,11 +156,7 @@ page_fault (struct intr_frame *f)
   write = (f->error_code & PF_W) != 0;
   user = (f->error_code & PF_U) != 0;
 
-<<<<<<< HEAD
   if (/*not_present ||*/ (user && !is_user_vaddr (fault_addr) ))
-=======
-  if (not_present || user)
->>>>>>> d0d3e25ae9c73889704878c8809e28974b2724b1
     sys_t_exit (-1);
 
   /* Get the fault page. */
@@ -169,7 +165,7 @@ page_fault (struct intr_frame *f)
 
   //printf ("\n[page fault] at %d in page %d\n", fault_addr, fault_page);
 
-  page = find_page (fault_page);
+  page = find_page (fault_page, t->pagedir);
   //pagedir_get_page (t->pagedir, fault_page);
   bool stack_access = fault_addr >= (f->esp - 32) && 
      (PHYS_BASE - pg_round_down (fault_addr)) <= (1<<20) * 8;  
@@ -177,11 +173,11 @@ page_fault (struct intr_frame *f)
   // TO DO: check for stack access
   if (page != NULL)
     {
-      //printf ("[Page fault load] rb=%d zb=%d writable=%d page=%d\n", page->file_data.read_bytes, page->file_data.zero_bytes, page->file_data.writable, page->addr);
+      //printf ("[Page fault load] rb=%d zb=%d writable=%d page=%d\n", page->file_data.read_bytes, page->file_data.zero_bytes, page->writable, page->addr);
 
       if ( !vm_load_page (page, fault_page, t->pagedir) )
         PANIC ("load error");
-      //printf ("[page_fault] Load was ok!\n");
+      
       return;
     }
   else if(page != NULL && stack_access)

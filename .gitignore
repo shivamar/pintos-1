@@ -3,3 +3,5 @@
 bochsrc.txt
 bochsout.txt
 spec
+src/examples/*
+doc/*

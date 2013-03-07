@@ -7,9 +7,9 @@
 
 struct vm_frame 
   {
-    void *page;                 /* Actual page. */
+    void *addr;                 /* Physical address of the frame. */
     struct thread *thread;      /* Owner thread. */
-    uint32_t *pte;              /* Page table entry of the frame's page. */
+    uint32_t *pagedir;          /* Page directory of the frame's page. */
     void *uva;                  /* Address of the frame's page. */
     struct hash_elem hash_elem; /* Hash element for the hash frame table. */
   };
@@ -18,6 +18,6 @@ struct vm_frame
 void vm_frame_init (void);
 void *vm_get_frame (enum palloc_flags flags);
 void vm_free_frame (void *);
-bool vm_frame_create_user (void *, uint32_t *, void *);
+bool vm_frame_add_page (void *, void *, uint32_t *);
 
 #endif /* vm/frame.h */

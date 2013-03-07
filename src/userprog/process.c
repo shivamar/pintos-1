@@ -549,29 +549,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       //printf ("[Load segemnt] rb=%d zb=%d writable=%d page=%d\n", page_read_bytes, page_zero_bytes, writable, upage); 
 
-#ifdef NORMAL_LOAD
-      /* Get a page of memory. */
-      uint8_t *kpage = vm_get_frame (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      file_seek (file, ofs);
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          vm_free_frame (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          vm_free_frame (kpage);
-          return false; 
-        }
-#endif
-
       struct vm_page *kpage = NULL;
       kpage = vm_new_file_page (upage, file, load_ofs, page_read_bytes, 
                                 page_zero_bytes, writable);
