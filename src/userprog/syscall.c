@@ -12,6 +12,7 @@
 #include "threads/malloc.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "vm/page.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <inttypes.h>
@@ -46,6 +47,8 @@ static struct list file_list;
 
 typedef int (*handler) (uint32_t, uint32_t, uint32_t);
 static handler syscall_map[32];
+
+static struct intr_frame *fbck;
 
 struct user_file
   {
@@ -96,6 +99,7 @@ syscall_handler (struct intr_frame *f)
 
   function = syscall_map[*param];
 
+  fbck = f;
   ret = function (*(param + 1), *(param + 2), *(param + 3));
   f->eax = ret;
 
@@ -153,6 +157,7 @@ sys_create (const char *file, unsigned initial_size)
 {
   if (file == NULL)
     sys_exit (-1);
+
   return filesys_create (file, initial_size);
 }
 
@@ -241,7 +246,36 @@ sys_read (int fd, void *buffer, unsigned length)
       if (f == NULL)
         ret = -1;
       else
-        ret = file_read (f->file, buffer, length);
+        {
+          uint32_t *pagedir = thread_current ()->pagedir;          
+          size_t rem = length;
+          void *tmp_buffer = buffer;
+
+          while (rem > 0)
+            {
+              size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
+              struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
+              
+              if (page == NULL && stack_access(fbck, tmp_buffer) )
+                page = vm_grow_stack (tmp_buffer);   
+              else if (page == NULL)
+                sys_t_exit (-1);
+
+              //printf ("[file write] %d %d %p\n", rem, ofs, tmp_buffer);              
+
+              if ( !page->loaded )
+                vm_load_page (page, tmp_buffer - ofs, pagedir);
+              vm_pin_page (page);
+
+              size_t read_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+
+              ret = file_read (f->file, tmp_buffer, read_bytes);
+              rem -= read_bytes;
+              tmp_buffer += read_bytes;
+              
+              vm_unpin_page (page);
+            }
+        }
     }
   lock_release (&file_lock);
 
@@ -274,7 +308,36 @@ sys_write (int fd, const void *buffer, unsigned length)
       if (f == NULL)
         ret = -1;
       else
-        ret = file_write (f->file, buffer, length);
+        {
+          uint32_t *pagedir = thread_current ()->pagedir;
+          size_t rem = length;
+          void *tmp_buffer = buffer;
+
+          while (rem > 0)
+            {
+              size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
+              struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
+              
+              if (page == NULL && stack_access(fbck, tmp_buffer) )
+                page = vm_grow_stack (tmp_buffer);   
+              else if (page == NULL)
+                sys_t_exit (-1);
+
+              //printf ("[file write] %d %d %p\n", rem, ofs, tmp_buffer);
+  
+              if ( !page->loaded )
+                vm_load_page (page, tmp_buffer - ofs, pagedir);
+              vm_pin_page (page);
+
+              size_t write_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              
+              ret = file_write (f->file, tmp_buffer, write_bytes);
+              rem -= write_bytes;
+              tmp_buffer += write_bytes;
+              
+              vm_unpin_page (page);
+            }
+        }
     }
   lock_release (&file_lock);
 

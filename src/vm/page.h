@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <list.h>
 #include "filesys/file.h"
+#include "threads/interrupt.h"
 
 enum vm_page_type
   {
@@ -18,6 +19,7 @@ struct vm_page
   bool loaded;
   bool writable;
   void *addr;
+  void *kpage;
   struct list_elem list_elem;
   uint32_t *pagedir;
 
@@ -41,9 +43,12 @@ struct vm_page *vm_new_swap_page (void *, size_t, bool);
 struct vm_page *vm_new_zero_page (void *, bool);
 bool vm_load_page (struct vm_page *, void *, uint32_t *);
 void vm_unload_page (struct vm_page *, void *);
-void vm_free_page (struct vm_page *);
-bool vm_grow_stack (void *);
+bool vm_delete_page (struct vm_page *);
+struct vm_page *vm_grow_stack (void *);
 void vm_page_init (void);
+void vm_pin_page (struct vm_page *);
+void vm_unpin_page (struct vm_page *);
 struct vm_page *find_page (void *, uint32_t *);
+bool stack_access (struct intr_frame *, void *);
 
 #endif /* vm/page.h */

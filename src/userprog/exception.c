@@ -167,8 +167,6 @@ page_fault (struct intr_frame *f)
 
   page = find_page (fault_page, t->pagedir);
   //pagedir_get_page (t->pagedir, fault_page);
-  bool stack_access = fault_addr >= (f->esp - 32) && 
-     (PHYS_BASE - pg_round_down (fault_addr)) <= (1<<20) * 8;  
 
   // TO DO: check for stack access
   if (page != NULL)
@@ -180,9 +178,9 @@ page_fault (struct intr_frame *f)
       
       return;
     }
-  else if(page != NULL && stack_access)
+  else if( stack_access (f, fault_addr) )
     {
-      vm_grow_stack (fault_addr);
+      vm_grow_stack (fault_page);
       return;
     }
 
@@ -191,6 +189,8 @@ page_fault (struct intr_frame *f)
       f->eip = (void *) f->eax;
       f->eax = 0xffffffff;
     }
+  else
+    sys_t_exit (-1);
 
   /* To implement virtual memory, delete the rest of the function
      body, and replace it with code that brings in the page to
