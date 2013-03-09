@@ -95,16 +95,14 @@ start_process (void *file_name_)
 
   /* Extract file name. */
   token = strtok_r (file_name, " ", &save_ptr);
-
   success = load (file_name, &if_.eip, &if_.esp);
-  
-  /* Set up the stack for the user program. */
-  stack_ok = set_up_user_prog_stack (&if_.esp, &save_ptr, token);
 
   cur = thread_current();
-
-  if (success && stack_ok) 
+  if (success) 
   {
+    /* Set up the stack for the user program. */
+    stack_ok = set_up_user_prog_stack (&if_.esp, &save_ptr, token);
+
     cur->exec = filesys_open (file_name);
     file_deny_write ( cur->exec );
     sema_up (&cur->sema_wait);

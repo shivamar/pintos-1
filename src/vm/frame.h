@@ -9,7 +9,6 @@
 struct vm_frame 
   {
     void *addr;                 /* Physical address of the frame. */
-    struct thread *thread;      /* Owner thread. */
     uint32_t *pagedir;          /* Page directory of the frame's page. */
     void *uva;                  /* Address of the frame's page. */
     bool pinned;                /* If the frame is pinned. */

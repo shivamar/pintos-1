@@ -158,7 +158,9 @@ sys_create (const char *file, unsigned initial_size)
   if (file == NULL)
     sys_exit (-1);
 
-  return filesys_create (file, initial_size);
+  int ret = filesys_create (file, initial_size);
+  //printf ("[create file] %s with status %d\n", file, ret);
+  return ret;
 }
 
 /* Delete a file. */
@@ -167,7 +169,9 @@ sys_remove (const char *file)
 {
    if (file == NULL)
      sys_exit (-1);
-   return filesys_remove (file);
+  
+  //printf ("[remove file] %s\n", file);  
+  return filesys_remove (file);
 }
 
 /* Open a file. */
@@ -177,12 +181,16 @@ sys_open (const char *file)
   struct file *sys_file;
   struct user_file *f;
 
+  //printf ("here 1 %s\n", file);
+
   if (file == NULL)
     return -1;
 
   sys_file = filesys_open (file);
   if (sys_file == NULL)
     return -1;
+
+  //printf ("here 2 %s\n", file);
 
   f = (struct user_file *) malloc (sizeof (struct user_file));
   if (f == NULL)
@@ -250,26 +258,32 @@ sys_read (int fd, void *buffer, unsigned length)
           uint32_t *pagedir = thread_current ()->pagedir;          
           size_t rem = length;
           void *tmp_buffer = buffer;
-
+          
+          ret = 0;
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
               struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
               
-              if (page == NULL && stack_access(fbck, tmp_buffer) )
-                page = vm_grow_stack (tmp_buffer);   
+              void *addr;
+              asm ("movl %%esp, %0" : "=r" (addr));
+
+              /* I experience a weird behaviour for page-mer-stk test. It needs 
+              to grow its stack when reading but the fault address it's 30 bytes
+              above the stack pointer so it's not recognized as authentic stack
+              access. We need to figure out this */
+              if (page == NULL ) //&& stack_access(fbck, tmp_buffer) )
+                page = vm_grow_stack (tmp_buffer - ofs);   
               else if (page == NULL)
                 sys_t_exit (-1);
-
-              //printf ("[file write] %d %d %p\n", rem, ofs, tmp_buffer);              
 
               if ( !page->loaded )
                 vm_load_page (page, tmp_buffer - ofs, pagedir);
               vm_pin_page (page);
 
               size_t read_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
-
-              ret = file_read (f->file, tmp_buffer, read_bytes);
+              ret += file_read (f->file, tmp_buffer, read_bytes);
+              
               rem -= read_bytes;
               tmp_buffer += read_bytes;
               
@@ -313,25 +327,24 @@ sys_write (int fd, const void *buffer, unsigned length)
           size_t rem = length;
           void *tmp_buffer = buffer;
 
+          ret = 0;
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
               struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
               
               if (page == NULL && stack_access(fbck, tmp_buffer) )
-                page = vm_grow_stack (tmp_buffer);   
+                page = vm_grow_stack (tmp_buffer - ofs);   
               else if (page == NULL)
                 sys_t_exit (-1);
 
-              //printf ("[file write] %d %d %p\n", rem, ofs, tmp_buffer);
-  
               if ( !page->loaded )
                 vm_load_page (page, tmp_buffer - ofs, pagedir);
               vm_pin_page (page);
 
               size_t write_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              ret += file_write (f->file, tmp_buffer, write_bytes);
               
-              ret = file_write (f->file, tmp_buffer, write_bytes);
               rem -= write_bytes;
               tmp_buffer += write_bytes;
               

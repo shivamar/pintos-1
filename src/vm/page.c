@@ -30,12 +30,16 @@ vm_page_init (void)
   list_init (&page_list);
 }
 
+static int cnt = 0;
+
 /* Creates a new page from a file segment. */
 struct vm_page*
 vm_new_file_page (void *addr, struct file *file, off_t ofs, 
                   size_t read_bytes, size_t zero_bytes, bool writable)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
+  
+  //printf ("[new_file_page] %d\n", ++cnt);
 
   if (page == NULL)
     return NULL;
@@ -61,6 +65,8 @@ vm_new_swap_page (void *addr, size_t index, bool writable)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
 
+  //printf ("[new_swap_page] %d\n", ++cnt);
+
   if (page == NULL)
     return NULL;
 
@@ -81,6 +87,8 @@ struct vm_page*
 vm_new_zero_page (void *addr, bool writable)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
+
+  //printf ("[new_zero_page] %d\n", ++cnt);
 
   if (page == NULL)
     return NULL;
@@ -144,10 +152,19 @@ vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
       return false;
     }
 
+  pagedir_clear_page (pagedir, fault_page);
   if (!pagedir_set_page (pagedir, fault_page, page->kpage, page->writable) )
     {
-      PANIC ("Unable to load the page!");
+      vm_frame_unpin (page->kpage);
+      return false;
     }
+
+  if (!pagedir_get_page (pagedir, fault_page) )
+    {
+      vm_frame_unpin (page->kpage);
+      return false;
+    }
+
   pagedir_set_dirty (pagedir, fault_page, false);
   pagedir_set_accessed (pagedir, fault_page, true);
   page->loaded = true;
@@ -211,7 +228,8 @@ struct vm_page *
 vm_grow_stack (void *fault_addr)
 {
   struct vm_page *page = vm_new_zero_page (fault_addr, true);
-  vm_load_page (page, fault_addr, page->pagedir);
+  if ( !vm_load_page (page, fault_addr, page->pagedir) )
+    return NULL;
 
   return page;
 }
@@ -257,6 +275,9 @@ vm_delete_page (struct vm_page *page)
   lock_acquire (&list_lock);
   list_remove (&page->list_elem);
   free (page);
+
+  --cnt;
+
   lock_release (&list_lock);
   return true;
 }
@@ -264,6 +285,6 @@ vm_delete_page (struct vm_page *page)
 bool
 stack_access (struct intr_frame *f, void *fault_addr)
 {
-  return fault_addr >= (f->esp - 32) &&
+  return fault_addr > 0 && fault_addr >= (f->esp - 32) &&
      (PHYS_BASE - pg_round_down (fault_addr)) <= (1<<20) * 8;
 }

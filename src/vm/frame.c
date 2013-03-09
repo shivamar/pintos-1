@@ -24,7 +24,11 @@ vm_frame_init ()
   lock_init (&evict_lock);
   random_init (0);
   hash_init (&vm_frames, frame_hash, frame_less, NULL);
+
+  //printf ("frame=%d page=%d\n", sizeof (struct vm_frame), sizeof (struct vm_page) );
 }
+
+static int cnt = 0;
 
 /* Obtains a free frame. TO DO: eviction */
 void *
@@ -34,7 +38,7 @@ vm_get_frame (enum palloc_flags flags)
   
   if (addr != NULL) 
   {
-    //printf ("[vm_get_frame] get a frame at address %p\n", addr);
+    //printf ("[vm_get_frame] get a frame at address %p %d\n", addr, ++cnt);
 
     struct vm_frame *vf;
     vf = (struct vm_frame *) malloc (sizeof (struct vm_frame) );
@@ -44,6 +48,8 @@ vm_get_frame (enum palloc_flags flags)
 
     vf->addr = addr;
     vf->pinned = false;
+    vf->uva = vf->pagedir = NULL;
+    vf->page = NULL;
 
     lock_acquire (&frame_lock);
     hash_insert (&vm_frames, &vf->hash_elem);
@@ -126,6 +132,8 @@ delete_page_frame (void *addr)
   hash_delete (&vm_frames, &vf->hash_elem);
   free (vf);
   lock_release (&frame_lock);
+
+  --cnt;
 
   return true;
 }

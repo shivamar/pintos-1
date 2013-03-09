@@ -85,6 +85,9 @@ inode_create (block_sector_t sector, off_t length)
   if (disk_inode != NULL)
     {
       size_t sectors = bytes_to_sectors (length);
+      
+      ASSERT (disk_inode->length >= 0);
+
       disk_inode->length = length;
       disk_inode->magic = INODE_MAGIC;
       if (free_map_allocate (sectors, &disk_inode->start)) 
@@ -204,6 +207,11 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
   off_t bytes_read = 0;
   uint8_t *bounce = NULL;
 
+  ASSERT ( inode_length (inode) >= 0);
+  ASSERT ( inode != NULL);
+
+  //printf (">>> size=%d off=%d\n", size, offset);
+
   while (size > 0) 
     {
       /* Disk sector to read, starting byte offset within sector. */
@@ -215,8 +223,13 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       int sector_left = BLOCK_SECTOR_SIZE - sector_ofs;
       int min_left = inode_left < sector_left ? inode_left : sector_left;
 
+      //printf ("min_left=%d sector_left=%d inode_left=%d\n", min_left, sector_left, inode_left);
+
       /* Number of bytes to actually copy out of this sector. */
       int chunk_size = size < min_left ? size : min_left;
+
+      //printf (">>>> %d\n", chunk_size);
+
       if (chunk_size <= 0)
         break;
 
@@ -232,8 +245,10 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
           if (bounce == NULL) 
             {
               bounce = malloc (BLOCK_SECTOR_SIZE);
-              if (bounce == NULL)
+              if (bounce == NULL) {
+                //printf ("COOSLSOFLDL TERORISTA\n");
                 break;
+              }
             }
           block_read (fs_device, sector_idx, bounce);
           memcpy (buffer + bytes_read, bounce + sector_ofs, chunk_size);
@@ -245,6 +260,8 @@ inode_read_at (struct inode *inode, void *buffer_, off_t size, off_t offset)
       bytes_read += chunk_size;
     }
   free (bounce);
+  
+  //printf (">>read was ok with %d\n", bytes_read);
 
   return bytes_read;
 }
