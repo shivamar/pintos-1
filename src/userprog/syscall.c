@@ -17,6 +17,7 @@
 #include <syscall-nr.h>
 #include <inttypes.h>
 #include <list.h>
+#include "vm/mmap.h"
 
 /* Process identifier. */
 typedef int pid_t;
@@ -38,15 +39,19 @@ static int       sys_write (int fd, const void *buffer, unsigned size);
 static void      sys_seek (int fd, unsigned position);
 static unsigned  sys_tell (int fd);
 static void      sys_close (int fd);
+static mapid_t   sys_mmap (int fd, void *addr);
+static void      sys_munmap (mapid_t mapping);
 
 static struct user_file *file_by_fid (fid_t);
 static fid_t allocate_fid (void);
+static mapid_t allocate_mapid (void);
 
 static struct lock file_lock;
 static struct list file_list;
 
 typedef int (*handler) (uint32_t, uint32_t, uint32_t);
 static handler syscall_map[32];
+//static struct hash sys_mfile;
 
 static struct intr_frame *fbck;
 
@@ -76,7 +81,8 @@ syscall_init (void)
   syscall_map[SYS_SEEK]     = (handler)sys_seek;
   syscall_map[SYS_TELL]     = (handler)sys_tell;
   syscall_map[SYS_CLOSE]    = (handler)sys_close;
-
+  syscall_map[SYS_MMAP]     = (handler)sys_mmap;
+  syscall_map[SYS_MUNMAP]   = (handler)sys_munmap;
   lock_init (&file_lock);
   list_init (&file_list);
 }
@@ -416,6 +422,14 @@ allocate_fid (void)
   return next_fid++;
 }
 
+/* Allocate a new mapid for a file */
+static mapid_t
+allocate_mapid (void)
+{
+  static mapid_t next_mapid = 0;
+  return next_mapid++;
+}
+
 /* Returns the file with the given fid from the current thread's files */
 static struct user_file *
 file_by_fid (int fid)
@@ -440,4 +454,77 @@ void
 sys_t_exit (int status)
 {
   sys_exit (status);
+}
+
+mapid_t
+sys_mmap (int fd, void *addr)
+{
+  struct user_file *f;
+  int size, page_allign;
+
+  lock_acquire (&file_lock);
+  f = file_by_fid (fd);
+  size = file_length (f->file);
+  lock_release (&file_lock);
+  if (size == 0)
+    return -1;
+
+  page_allign = pg_ofs (addr);
+  if (page_allign != 0)
+    return -1;
+
+  if (addr == NULL || addr == 0x0)
+    return -1;
+  if (fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    return -1;
+
+  lock_acquire (&file_lock);
+  struct user_file *f_reopen = file_reopen (f);
+  size_t ofs = 0;
+  while (size > 0)
+    {
+      size_t read_bytes;
+      size_t zero_bytes;
+      struct vm_page *page;
+      if (size >= PGSIZE)
+        {
+          read_bytes = PGSIZE;
+          zero_bytes = 0;
+          page = vm_new_file_page (addr, f_reopen, ofs, read_bytes, zero_bytes,
+                                   true);
+        }
+      else
+        {
+          read_bytes = size;
+          zero_bytes = PGSIZE - size;
+          page = vm_new_file_page (addr, f_reopen, ofs, read_bytes, zero_bytes,
+                                   true);
+        }
+      ofs += PGSIZE;
+      size -= PGSIZE;
+      addr += PGSIZE;
+    }
+  mapid_t mapping = allocate_mapid();
+  vm_mfile_insert (mapping, fd);
+  lock_release (&file_lock);
+  return mapping;
+}
+
+void
+sys_munmap (mapid_t mapping)
+{
+  lock_acquire (&file_lock);
+  uint32_t *pagedir = thread_current ()->pagedir;
+  struct vm_mfile *f = vm_find_mfile (mapping);
+  if (f == NULL)
+    return;
+ 
+  struct vm_page *page = find_page (f->addr, pagedir);
+  if (page == NULL)
+    return;
+
+  vm_unload_page (page, f->addr);
+  vm_delete_page (page);
+  vm_delete_mfile (mapping);
+  lock_release (&file_lock);  
 }
