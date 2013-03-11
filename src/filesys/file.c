@@ -140,6 +140,16 @@ file_allow_write (struct file *file)
     }
 }
 
+/*  Returns true if the write operations are enabled on FILE's
+    underlying inode. (Writes might still be denied by some other
+    file that has the same inode open.) */
+bool
+file_writable (struct file *file)
+{
+  ASSERT (file != NULL);
+  return file->deny_write;
+}
+
 /* Returns the size of FILE in bytes. */
 off_t
 file_length (struct file *file) 

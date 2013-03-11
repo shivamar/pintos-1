@@ -8,14 +8,18 @@ typedef int mapid_t;
 
 struct vm_mfile
   {
-    mapid_t mapping;
-    int fd;                      /* File descriptor. */
+    mapid_t mapid;
+    int fid;                     /* File descriptor. */
     struct hash_elem hash_elem;  /* Hash element for the hash frame table. */
-    void *addr;
+    struct list_elem thread_elem;/* List elem for a thread's mfile list. */
+    void *start_addr;            /* User virtual address of start and end */
+    void *end_addr;              /* of the mapped file as it might span on */
+                                 /* multiple pages. */
   };
 
+void vm_mfile_init (void);
 struct vm_mfile *vm_find_mfile (mapid_t);
-void vm_mfile_insert (mapid_t, int);
-bool vm_delete_mfile (void *);
+void vm_insert_mfile (mapid_t, int, void *, void *);
+bool vm_delete_mfile (mapid_t);
 
 #endif /* vm/mmap.h */

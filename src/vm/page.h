@@ -28,7 +28,7 @@ struct vm_page
     struct file *file;
     off_t ofs;
     size_t read_bytes;
-    size_t zero_bytes;   
+    size_t zero_bytes;
   } file_data;
 
   struct
@@ -41,14 +41,14 @@ struct vm_page *vm_new_file_page (void *, struct file *, off_t, uint32_t,
                                   uint32_t, bool);
 struct vm_page *vm_new_swap_page (void *, size_t, bool);
 struct vm_page *vm_new_zero_page (void *, bool);
-bool vm_load_page (struct vm_page *, void *, uint32_t *);
+bool vm_load_page (struct vm_page *, void *);
 void vm_unload_page (struct vm_page *, void *);
 bool vm_delete_page (struct vm_page *);
 struct vm_page *vm_grow_stack (void *);
 void vm_page_init (void);
 void vm_pin_page (struct vm_page *);
 void vm_unpin_page (struct vm_page *);
-struct vm_page *find_page (void *, uint32_t *);
-bool stack_access (struct intr_frame *, void *);
+struct vm_page *find_page (void *);
+bool stack_access (void *, void *);
 
 #endif /* vm/page.h */

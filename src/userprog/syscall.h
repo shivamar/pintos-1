@@ -2,7 +2,6 @@
 #define USERPROG_SYSCALL_H
 
 void syscall_init (void);
-/* memory test */
-void sys_t_exit (int status);
+void sys_t_exit (int);
 
 #endif /* userprog/syscall.h */

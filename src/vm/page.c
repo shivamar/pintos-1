@@ -19,7 +19,6 @@ static bool vm_load_file_page (uint8_t *kpage, struct vm_page *page);
 static bool vm_load_swap_page (uint8_t *kpage, struct vm_page *page);
 static bool vm_load_zero_page (uint8_t *kpage);
 
-static bool delete_page (struct vm_page *page);
 static bool add_page (struct vm_page *page);
 
 void
@@ -34,8 +33,8 @@ static int cnt = 0;
 
 /* Creates a new page from a file segment. */
 struct vm_page*
-vm_new_file_page (void *addr, struct file *file, off_t ofs, 
-                  size_t read_bytes, size_t zero_bytes, bool writable)
+vm_new_file_page (void *addr, struct file *file, off_t ofs, size_t read_bytes,
+                  size_t zero_bytes, bool writable)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
   
@@ -121,7 +120,7 @@ vm_unpin_page (struct vm_page *page)
 }
 
 bool 
-vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
+vm_load_page (struct vm_page *page, void *uva)
 {
   /* Get a frame of memory. */
   lock_acquire (&load_lock);
@@ -152,21 +151,21 @@ vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
       return false;
     }
 
-  pagedir_clear_page (pagedir, fault_page);
-  if (!pagedir_set_page (pagedir, fault_page, page->kpage, page->writable) )
+  pagedir_clear_page (page->pagedir, uva);
+  if (!pagedir_set_page (page->pagedir, uva, page->kpage, page->writable) )
     {
       vm_frame_unpin (page->kpage);
       return false;
     }
 
-  if (!pagedir_get_page (pagedir, fault_page) )
+  if (!pagedir_get_page (page->pagedir, uva) )
     {
       vm_frame_unpin (page->kpage);
       return false;
     }
 
-  pagedir_set_dirty (pagedir, fault_page, false);
-  pagedir_set_accessed (pagedir, fault_page, true);
+  pagedir_set_dirty (page->pagedir, uva, false);
+  pagedir_set_accessed (page->pagedir, uva, true);
   page->loaded = true;
 
   vm_frame_unpin (page->kpage);
@@ -174,20 +173,29 @@ vm_load_page (struct vm_page *page, void *fault_page, uint32_t *pagedir)
 }
 
 void
-vm_unload_page (struct vm_page *page, void *addr)
+vm_unload_page (struct vm_page *page, void *kpage)
 {
-  pagedir_clear_page (page->pagedir, page->addr);
-  page->loaded = false;
-  page->kpage = NULL;  
-
   //printf ("Page unload for %p %p\n", page->addr, page->pagedir);
 
-  if ( page->type == SWAP || pagedir_is_dirty (page->pagedir, page->addr) )
+  if (page->type == FILE && pagedir_is_dirty (page->pagedir, page->addr) &&
+      file_writable (page->file_data.file) == false)
+    {
+      /* Write the page back to the file. */
+      vm_frame_pin (page->kpage);
+      file_seek (page->file_data.file, page->file_data.ofs);
+      file_write (page->file_data.file, kpage, page->file_data.read_bytes);
+      vm_frame_unpin (page->kpage);
+    }
+  else if (page->type == SWAP || pagedir_is_dirty (page->pagedir, page->addr))
     {
       /* Store the page to swap. */
       page->type = SWAP;
-      page->swap_data.index = vm_swap_store (addr);
+      page->swap_data.index = vm_swap_store (kpage);
     }
+ 
+  pagedir_clear_page (page->pagedir, page->addr);
+  page->loaded = false;
+  page->kpage = NULL;
 }
 
 static bool
@@ -225,20 +233,21 @@ vm_load_swap_page (uint8_t *kpage, struct vm_page *page)
 }
 
 struct vm_page *
-vm_grow_stack (void *fault_addr)
+vm_grow_stack (void *uva)
 {
-  struct vm_page *page = vm_new_zero_page (fault_addr, true);
-  if ( !vm_load_page (page, fault_addr, page->pagedir) )
+  struct vm_page *page = vm_new_zero_page (uva, true);
+  if ( !vm_load_page (page, uva) )
     return NULL;
 
   return page;
 }
 
 struct vm_page *
-find_page (void *addr, uint32_t *pagedir)
+find_page (void *addr)
 {
   //printf ("[find page] for adr %d in %p\n", addr, pagedir);
 
+  uint32_t *pagedir = thread_current ()->pagedir;
   struct list_elem *e;
   lock_acquire (&list_lock);
 
@@ -283,8 +292,8 @@ vm_delete_page (struct vm_page *page)
 }
 
 bool
-stack_access (struct intr_frame *f, void *fault_addr)
+stack_access (void *esp, void *addr)
 {
-  return fault_addr > 0 && fault_addr >= (f->esp - 32) &&
-     (PHYS_BASE - pg_round_down (fault_addr)) <= (1<<20) * 8;
+  return (uint32_t)addr > 0 && addr >= (esp - 32) &&
+     (PHYS_BASE - pg_round_down (addr)) <= (1<<23);
 }

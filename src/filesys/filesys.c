@@ -69,11 +69,6 @@ filesys_open (const char *name)
   struct dir *dir = dir_open_root ();
   struct inode *inode = NULL;
 
-  /* Here we get a bug sometimes. */
-  //ASSERT ( inode_length (dir->inode) >= 0);
-  while ( inode_length (dir->inode) < 0)
-    thread_yield ();
-
   if (dir != NULL)
     dir_lookup (dir, name, &inode);
   dir_close (dir);

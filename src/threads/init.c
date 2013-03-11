@@ -40,6 +40,7 @@
 #endif
 #ifdef VM
 #include "vm/swap.h"
+#include "vm/mmap.h"
 #endif
 
 /* Page directory with kernel mappings only. */
@@ -135,6 +136,7 @@ main (void)
 
 #ifdef VM
   vm_swap_init ();
+  vm_mfile_init ();
 #endif
 
   printf ("Boot complete.\n");

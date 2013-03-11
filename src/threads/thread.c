@@ -262,6 +262,7 @@ thread_create (const char *name, int priority,
   if (thread_current () != initial_thread)
     list_push_back (&thread_current ()->children, &t->child_elem);
   list_init (&t->files);
+  list_init (&t->mfiles);
 #endif
 
   return tid;

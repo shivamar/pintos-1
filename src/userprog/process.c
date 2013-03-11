@@ -465,7 +465,6 @@ load (const char *file_name, void (**eip) (void), void **esp)
 /* load() helpers. */
 
 static bool install_page (void *upage, void *kpage, bool writable);
-static bool install_vm_page (void *upage, void *kpage);
 
 /* Checks whether PHDR describes a valid, loadable segment in
    FILE and returns true if so, false otherwise. */
@@ -528,7 +527,6 @@ int test = 0;
 
    Return true if successful, false if a memory allocation error
    or disk read error occurs. */
-#define LAZY_LOAD
 static bool
 load_segment (struct file *file, off_t ofs, uint8_t *upage,
               uint32_t read_bytes, uint32_t zero_bytes, bool writable) 
@@ -538,9 +536,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
   ASSERT (ofs % PGSIZE == 0);
 
   off_t load_ofs = ofs;
-#ifndef LAZY_LOAD
-  file_seek (file, ofs);
-#endif
   while (read_bytes > 0 || zero_bytes > 0) 
     {
       /* Calculate how to fill this page.
@@ -551,7 +546,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
 
       //printf ("[Load segemnt] rb=%d zb=%d writable=%d page=%d\n", page_read_bytes, page_zero_bytes, writable, upage); 
 
-#ifdef LAZY_LOAD
       struct vm_page *page = NULL;
       page = vm_new_file_page (upage, file, load_ofs, page_read_bytes, 
                                 page_zero_bytes, writable);
@@ -560,28 +554,6 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
           vm_delete_page (page);
           return false;
         }
-#else
-      /* Get a page of memory. */
-      uint8_t *kpage = vm_get_frame (PAL_USER);
-      if (kpage == NULL)
-        return false;
-
-      /* Load this page. */
-      file_seek (file, ofs);
-      if (file_read (file, kpage, page_read_bytes) != (int) page_read_bytes)
-        {
-          vm_free_frame (kpage);
-          return false; 
-        }
-      memset (kpage + page_read_bytes, 0, page_zero_bytes);
-
-      /* Add the page to the process's address space. */
-      if (!install_page (upage, kpage, writable)) 
-        {
-          vm_free_frame (kpage);
-          return false; 
-        }
-#endif
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -589,9 +561,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       upage += PGSIZE;
       load_ofs += PGSIZE;
     }
-#ifdef LAZY_LOAD
   file_seek (file, ofs);
-#endif
 
   return true;
 }
@@ -602,7 +572,6 @@ static bool
 setup_stack (void **esp) 
 {
   struct vm_page *page = NULL;
-  struct thread *t;
 
   page = vm_new_zero_page (((uint8_t *) PHYS_BASE) - PGSIZE, true); 
 
@@ -613,8 +582,7 @@ setup_stack (void **esp)
     }
   
   *esp = PHYS_BASE;
-  t = thread_current ();
-  vm_load_page (page, ((uint8_t *) PHYS_BASE) - PGSIZE, t->pagedir);  
+  vm_load_page (page, ((uint8_t *) PHYS_BASE) - PGSIZE);  
 
   return true;
 }

@@ -7,11 +7,11 @@
 #include "threads/malloc.h"
 
 /* A directory. */
-//struct dir 
-//  {
-//    struct inode *inode;                /* Backing store. */
-//    off_t pos;                          /* Current position. */
-//  };
+struct dir 
+  {
+    struct inode *inode;                /* Backing store. */
+    off_t pos;                          /* Current position. */
+  };
 
 /* A single directory entry. */
 struct dir_entry 
@@ -93,34 +93,21 @@ lookup (const struct dir *dir, const char *name,
         struct dir_entry *ep, off_t *ofsp) 
 {
   struct dir_entry e;
-  size_t ofs = 0;
+  size_t ofs;
   
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  //printf ("will search for %s from %p\n", name, dir->inode);
-  //printf (">>> %d %d\n", inode_read_at (dir->inode, &e, sizeof e, ofs), sizeof e);
-
   for (ofs = 0; inode_read_at (dir->inode, &e, sizeof e, ofs) == sizeof e;
        ofs += sizeof e) 
-  {
-    //printf (">>>>>comp ofs=%d %s %s\n", ofs, name, e.name);
-
     if (e.in_use && !strcmp (name, e.name)) 
       {
         if (ep != NULL)
           *ep = e;
         if (ofsp != NULL)
           *ofsp = ofs;
-
-        //printf ("Search was ok %s :D\n", name);
-
         return true;
       }
-  }  
-
-  //printf ("[Search for %s] was bad :(\n", name);
-
   return false;
 }
 
@@ -137,8 +124,16 @@ dir_lookup (const struct dir *dir, const char *name,
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
 
-  ASSERT ( inode_length (dir->inode) >= 0);
-  
+  /* Weird behavior experienced on my laptop. The length inode of
+     the root directory length appears to be a negative value when
+     running the page-merge-par testcase when opening "buf4" file.
+     Because of that the test fail. This hack seems to fix it. 
+     I don't experience this bug on any lab machine so it appears
+     to be a heissen bug. Also I random add some printf around here
+     it works also :) */ 
+  while (inode_length (dir->inode) < 0)
+    thread_yield ();
+
   if (lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);
   else

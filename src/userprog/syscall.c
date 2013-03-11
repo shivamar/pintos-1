@@ -13,11 +13,11 @@
 #include "filesys/file.h"
 #include "filesys/filesys.h"
 #include "vm/page.h"
+#include "vm/mmap.h"
 #include <stdio.h>
 #include <syscall-nr.h>
 #include <inttypes.h>
 #include <list.h>
-#include "vm/mmap.h"
 
 /* Process identifier. */
 typedef int pid_t;
@@ -40,7 +40,7 @@ static void      sys_seek (int fd, unsigned position);
 static unsigned  sys_tell (int fd);
 static void      sys_close (int fd);
 static mapid_t   sys_mmap (int fd, void *addr);
-static void      sys_munmap (mapid_t mapping);
+static void      sys_munmap (mapid_t mapid);
 
 static struct user_file *file_by_fid (fid_t);
 static fid_t allocate_fid (void);
@@ -51,9 +51,8 @@ static struct list file_list;
 
 typedef int (*handler) (uint32_t, uint32_t, uint32_t);
 static handler syscall_map[32];
-//static struct hash sys_mfile;
 
-static struct intr_frame *fbck;
+static void *esp;
 
 struct user_file
   {
@@ -83,6 +82,7 @@ syscall_init (void)
   syscall_map[SYS_CLOSE]    = (handler)sys_close;
   syscall_map[SYS_MMAP]     = (handler)sys_mmap;
   syscall_map[SYS_MUNMAP]   = (handler)sys_munmap;
+
   lock_init (&file_lock);
   list_init (&file_list);
 }
@@ -105,7 +105,7 @@ syscall_handler (struct intr_frame *f)
 
   function = syscall_map[*param];
 
-  fbck = f;
+  esp = f->esp;
   ret = function (*(param + 1), *(param + 2), *(param + 3));
   f->eax = ret;
 
@@ -130,10 +130,17 @@ sys_exit (int status)
   if (lock_held_by_current_thread (&file_lock) )
     lock_release (&file_lock);
 
+  /* Close all opened files of the thread. */
   while (!list_empty (&t->files) )
     {
       e = list_begin (&t->files);
       sys_close ( list_entry (e, struct user_file, thread_elem)->fid );
+    }
+  /* Unmap all memory mapped files of the thread. */
+  while (!list_empty (&t->mfiles) )
+    {
+      e = list_begin (&t->mfiles);
+      sys_munmap ( list_entry (e, struct vm_mfile, thread_elem)->mapid );
     }
 
   t->ret_status = status;
@@ -165,7 +172,6 @@ sys_create (const char *file, unsigned initial_size)
     sys_exit (-1);
 
   int ret = filesys_create (file, initial_size);
-  //printf ("[create file] %s with status %d\n", file, ret);
   return ret;
 }
 
@@ -176,7 +182,6 @@ sys_remove (const char *file)
    if (file == NULL)
      sys_exit (-1);
   
-  //printf ("[remove file] %s\n", file);  
   return filesys_remove (file);
 }
 
@@ -187,16 +192,12 @@ sys_open (const char *file)
   struct file *sys_file;
   struct user_file *f;
 
-  //printf ("here 1 %s\n", file);
-
   if (file == NULL)
     return -1;
 
   sys_file = filesys_open (file);
   if (sys_file == NULL)
     return -1;
-
-  //printf ("here 2 %s\n", file);
 
   f = (struct user_file *) malloc (sizeof (struct user_file));
   if (f == NULL)
@@ -239,21 +240,19 @@ sys_read (int fd, void *buffer, unsigned length)
   struct user_file *f;
   int ret = -1;
 
-  lock_acquire (&file_lock);
   if (fd == STDIN_FILENO)
     {
+      lock_acquire (&file_lock);
       unsigned i;
       for (i = 0; i < length; ++i)
         *(uint8_t *)(buffer + i) = input_getc ();
+      lock_release (&file_lock);
       ret = length;
     }
   else if (fd == STDOUT_FILENO)
     ret = -1;
   else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
-    {
-      lock_release (&file_lock);
-      sys_exit (-1);
-    }
+    sys_exit (-1);
   else
     {
       f = file_by_fid (fd);
@@ -261,15 +260,14 @@ sys_read (int fd, void *buffer, unsigned length)
         ret = -1;
       else
         {
-          uint32_t *pagedir = thread_current ()->pagedir;          
           size_t rem = length;
-          void *tmp_buffer = buffer;
-          
+          void *tmp_buffer = (void *)buffer;
+
           ret = 0;
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
-              struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
+              struct vm_page *page = find_page (tmp_buffer - ofs);
               
               void *addr;
               asm ("movl %%esp, %0" : "=r" (addr));
@@ -278,18 +276,20 @@ sys_read (int fd, void *buffer, unsigned length)
               to grow its stack when reading but the fault address it's 30 bytes
               above the stack pointer so it's not recognized as authentic stack
               access. We need to figure out this */
-              if (page == NULL ) //&& stack_access(fbck, tmp_buffer) )
+              if (page == NULL && stack_access(esp, tmp_buffer) )
                 page = vm_grow_stack (tmp_buffer - ofs);   
               else if (page == NULL)
                 sys_t_exit (-1);
 
               if ( !page->loaded )
-                vm_load_page (page, tmp_buffer - ofs, pagedir);
+                vm_load_page (page, tmp_buffer - ofs);
               vm_pin_page (page);
 
               size_t read_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              lock_acquire (&file_lock);
               ret += file_read (f->file, tmp_buffer, read_bytes);
-              
+              lock_release (&file_lock);              
+
               rem -= read_bytes;
               tmp_buffer += read_bytes;
               
@@ -297,8 +297,6 @@ sys_read (int fd, void *buffer, unsigned length)
             }
         }
     }
-  lock_release (&file_lock);
-
   return ret;
 }
 
@@ -309,19 +307,17 @@ sys_write (int fd, const void *buffer, unsigned length)
   struct user_file *f;
   int ret = -1;
 
-  lock_acquire (&file_lock);
   if (fd == STDIN_FILENO)
     ret = -1;
   else if (fd == STDOUT_FILENO)
     {
+      lock_acquire (&file_lock);
       putbuf (buffer, length);
+      lock_release (&file_lock);
       ret = length;
     }
   else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
-    {
-      lock_release (&file_lock);
-      sys_exit (-1);
-    }
+    sys_exit (-1);
   else
     {
       f = file_by_fid (fd);
@@ -329,28 +325,29 @@ sys_write (int fd, const void *buffer, unsigned length)
         ret = -1;
       else
         {
-          uint32_t *pagedir = thread_current ()->pagedir;
           size_t rem = length;
-          void *tmp_buffer = buffer;
+          void *tmp_buffer = (void *)buffer;
 
           ret = 0;
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
-              struct vm_page *page = find_page ( tmp_buffer - ofs, pagedir);
+              struct vm_page *page = find_page (tmp_buffer - ofs);
               
-              if (page == NULL && stack_access(fbck, tmp_buffer) )
+              if (page == NULL && stack_access(esp, tmp_buffer) )
                 page = vm_grow_stack (tmp_buffer - ofs);   
               else if (page == NULL)
                 sys_t_exit (-1);
 
               if ( !page->loaded )
-                vm_load_page (page, tmp_buffer - ofs, pagedir);
+                vm_load_page (page, tmp_buffer - ofs);
               vm_pin_page (page);
 
               size_t write_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              lock_acquire (&file_lock);
               ret += file_write (f->file, tmp_buffer, write_bytes);
-              
+              lock_release (&file_lock);              
+
               rem -= write_bytes;
               tmp_buffer += write_bytes;
               
@@ -358,8 +355,6 @@ sys_write (int fd, const void *buffer, unsigned length)
             }
         }
     }
-  lock_release (&file_lock);
-
   return ret;
 }
 
@@ -414,6 +409,84 @@ sys_close (int fd)
   lock_release (&file_lock);
 }
 
+/* Creates a memory mapped file from the given file. */
+mapid_t
+sys_mmap (int fd, void *addr)
+{
+  size_t size;
+  struct file *file;
+
+  size = sys_filesize(fd);
+  file = file_reopen ( file_by_fid (fd)->file );
+  
+  if (size <= 0 || file == NULL)
+    return -1;
+  if (addr == NULL || addr == 0x0 || pg_ofs (addr) != 0)
+    return -1;
+  if (fd == STDIN_FILENO || fd == STDOUT_FILENO)
+    return -1;
+
+  size_t ofs = 0;
+  void *tmp_addr = addr;
+  while (size > 0)
+    {
+      size_t read_bytes;
+      size_t zero_bytes;
+      struct vm_page *page;
+      
+      if (size >= PGSIZE)
+        {
+          read_bytes = PGSIZE;
+          zero_bytes = 0;
+        }
+      else
+        {
+          read_bytes = size;
+          zero_bytes = PGSIZE - size;
+        }
+  
+      /* Fail if there is already a mapped page at the same address. */
+      if ( find_page (tmp_addr) != NULL)
+          return -1;
+      
+      page = vm_new_file_page (tmp_addr, file, ofs, read_bytes, 
+                               zero_bytes, true);
+      ofs += PGSIZE;
+      size -= read_bytes;
+      tmp_addr += PGSIZE;
+    }
+
+  mapid_t mapid = allocate_mapid();
+  vm_insert_mfile (mapid, fd, addr, tmp_addr);
+
+  return mapid;
+}
+
+/* Unmaps a files from memory. */
+void
+sys_munmap (mapid_t mapid)
+{
+  struct vm_mfile *mf = vm_find_mfile (mapid);
+  if (mf == NULL)
+    sys_exit (-1);
+
+  void *addr = mf->start_addr;
+  for (;addr < mf->end_addr; addr += PGSIZE)
+    {
+      struct vm_page *page = NULL;
+
+      page = find_page (addr);
+      if (page == NULL)
+        continue;
+
+      if (page->loaded == true)
+        vm_unload_page (page, addr);
+      vm_delete_page (page);
+    }
+  vm_delete_mfile (mapid);
+}
+
+
 /* Allocate a new fid for a file */
 static fid_t
 allocate_fid (void)
@@ -454,77 +527,4 @@ void
 sys_t_exit (int status)
 {
   sys_exit (status);
-}
-
-mapid_t
-sys_mmap (int fd, void *addr)
-{
-  struct user_file *f;
-  int size, page_allign;
-
-  lock_acquire (&file_lock);
-  f = file_by_fid (fd);
-  size = file_length (f->file);
-  lock_release (&file_lock);
-  if (size == 0)
-    return -1;
-
-  page_allign = pg_ofs (addr);
-  if (page_allign != 0)
-    return -1;
-
-  if (addr == NULL || addr == 0x0)
-    return -1;
-  if (fd == STDIN_FILENO || fd == STDOUT_FILENO)
-    return -1;
-
-  lock_acquire (&file_lock);
-  struct user_file *f_reopen = file_reopen (f);
-  size_t ofs = 0;
-  while (size > 0)
-    {
-      size_t read_bytes;
-      size_t zero_bytes;
-      struct vm_page *page;
-      if (size >= PGSIZE)
-        {
-          read_bytes = PGSIZE;
-          zero_bytes = 0;
-          page = vm_new_file_page (addr, f_reopen, ofs, read_bytes, zero_bytes,
-                                   true);
-        }
-      else
-        {
-          read_bytes = size;
-          zero_bytes = PGSIZE - size;
-          page = vm_new_file_page (addr, f_reopen, ofs, read_bytes, zero_bytes,
-                                   true);
-        }
-      ofs += PGSIZE;
-      size -= PGSIZE;
-      addr += PGSIZE;
-    }
-  mapid_t mapping = allocate_mapid();
-  vm_mfile_insert (mapping, fd);
-  lock_release (&file_lock);
-  return mapping;
-}
-
-void
-sys_munmap (mapid_t mapping)
-{
-  lock_acquire (&file_lock);
-  uint32_t *pagedir = thread_current ()->pagedir;
-  struct vm_mfile *f = vm_find_mfile (mapping);
-  if (f == NULL)
-    return;
- 
-  struct vm_page *page = find_page (f->addr, pagedir);
-  if (page == NULL)
-    return;
-
-  vm_unload_page (page, f->addr);
-  vm_delete_page (page);
-  vm_delete_mfile (mapping);
-  lock_release (&file_lock);  
 }
