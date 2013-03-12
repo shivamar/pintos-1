@@ -13,6 +13,7 @@
 #include "threads/vaddr.h"
 #ifdef USERPROG
 #include "userprog/process.h"
+#include "vm/page.h"
 #endif
 #include "threads/fixed-point.h"
 #include "devices/timer.h"
@@ -263,6 +264,7 @@ thread_create (const char *name, int priority,
     list_push_back (&thread_current ()->children, &t->child_elem);
   list_init (&t->files);
   list_init (&t->mfiles);
+  hash_init (&t->pages, page_hash, page_less, NULL);
 #endif
 
   return tid;

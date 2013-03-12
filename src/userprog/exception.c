@@ -133,7 +133,6 @@ page_fault (struct intr_frame *f)
   void *fault_addr;  /* Fault address. */
   void *fault_page;  /* Fault page. */
   struct vm_page *page; 
-  uint32_t *pagedir;       
 
   /* Obtain faulting address, the virtual address that was
      accessed to cause the fault.  It may point to code or to
@@ -162,7 +161,6 @@ page_fault (struct intr_frame *f)
 
   /* Get the fault page. */
   fault_page = (void *) (PTE_ADDR & (uint32_t) fault_addr);
-  pagedir = thread_current ()->pagedir;
 
   //printf ("\n[page fault] at %p in page %d %d %d %d po=%p\n", fault_addr, fault_page, not_present, write, user, f->esp);
   page = find_page (fault_page);
@@ -175,7 +173,7 @@ page_fault (struct intr_frame *f)
     {
       //printf ("[Page fault load] rb=%d zb=%d writable=%d page=%d\n", page->file_data.read_bytes, page->file_data.zero_bytes, page->writable, page->addr);
 
-      if ( !vm_load_page (page, fault_page) )
+      if ( !vm_load_page (page, fault_page, false) )
         sys_t_exit (-1);
       
       return;
@@ -184,7 +182,7 @@ page_fault (struct intr_frame *f)
     {
       //printf ("[Need to grow stack]\n");
 
-      if ( !vm_grow_stack (fault_page) )
+      if ( !vm_grow_stack (fault_page, false) )
         sys_t_exit (-1);
       return;
     }

@@ -13,7 +13,7 @@ static struct hash vm_frames;
 static unsigned frame_hash (const struct hash_elem *, void *);
 static bool frame_less (const struct hash_elem *, const struct hash_elem *, void *);
 static struct vm_frame *find_frame (void *);
-static bool delete_page_frame (void *);
+static bool delete_frame (void *);
 static bool eviction (void);
 
 /* Initialise the frame table. */
@@ -47,7 +47,9 @@ vm_get_frame (enum palloc_flags flags)
       return false;
 
     vf->addr = addr;
-    vf->pinned = false;
+    /* A new frame will be pinned until the caller will load the data to it.
+       This way pe make sure it won't be evicted anytime in between. */
+    vf->pinned = true;
     vf->uva = vf->pagedir = NULL;
     vf->page = NULL;
 
@@ -71,22 +73,20 @@ vm_get_frame (enum palloc_flags flags)
   return addr;
 }
 
-/* Frees the given frame. */
+/* Frees the given frame and writes the data back to swap
+   or file. This function will be called on process exit. */
 void 
 vm_free_frame (void *addr)
 {
-  delete_page_frame (addr);
-  palloc_free_page (addr);
-}
-
-/* Frees the given page. */
-void
-vm_free_page (void *addr)
-{
   struct vm_frame *vf = find_frame (addr);
   
-  if (vf != NULL && vf->page != NULL)
-    vm_delete_page (vf->page);
+  if (vf == NULL)
+    return;
+  ASSERT (vf->page != NULL);
+
+  vm_unload_page (vf->page, vf->addr);
+  delete_frame (addr);
+  palloc_free_page (addr);
 }
 
 /* Creates a mapping for the page to the vm_frame. */
@@ -117,9 +117,9 @@ vm_frame_add_page (void *frame, void *uva, uint32_t *pagedir)
   return true;
 }
 
-/* Removes the given page from it's frame. */
+/* Removes the given page from its frame. */
 static bool
-delete_page_frame (void *addr)
+delete_frame (void *addr)
 {
   struct vm_frame *vf = find_frame (addr);
   
@@ -149,14 +149,17 @@ eviction ()
   size_t iteration = 0;
   while (victim == NULL)
     {
+      //ASSERT (iteration < 5);
+
       struct hash_iterator it;
       hash_first (&it, &vm_frames);
-    
+      size_t cnt = 0;    
+
       while (hash_next (&it))
         {
           f = hash_entry (hash_cur (&it), struct vm_frame, hash_elem);
           if (f->pinned == true)
-            continue;      
+            { ++cnt; continue; }  
 
           ASSERT (f->pagedir != NULL);
           ASSERT (f->uva != NULL);
@@ -171,12 +174,16 @@ eviction ()
           break;
         }
       ++iteration;
+
+      if (iteration > 4) {
+        printf ("At the %d iteration %d pinned out of %d\n", iteration, cnt, hash_size (&vm_frames) );
+        ASSERT (true);
+      }
     }
 
-  //printf ("[Eviction] for frame %p\n", victim->addr);
+  //printf ("[Eviction] for frame %p and page %p\n", victim->addr, victim->page->addr);
 
-  vm_unload_page (victim->page, victim->addr);
-  vm_free_frame(victim->addr);
+  vm_free_frame (victim->addr);
   lock_release (&evict_lock);
 
   return true;
@@ -220,7 +227,7 @@ frame_hash (const struct hash_elem *f_, void *aux UNUSED)
   return hash_int ((unsigned)f->addr);
 }
 
-/* Returns true if a frame a precedes frame b. */
+/* Returns true if a frame a preceds frame b. */
 static bool
 frame_less (const struct hash_elem *a_, const struct hash_elem *b_,
                void *aux UNUSED)

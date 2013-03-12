@@ -3,6 +3,7 @@
 
 #include <debug.h>
 #include <list.h>
+#include <hash.h>
 #include <stdint.h>
 #include "threads/synch.h"
 #include "filesys/file.h"
@@ -127,6 +128,7 @@ struct thread
     struct file *exec;                  /* The file containing the thread executable */
     struct list files;                  /* A list of open files */
     struct list mfiles;                 /* A list of memory mapped files */
+    struct hash pages;                  /* A hash table of virtual memory pages. */
     struct list children;               /* A list of children process */
     struct list_elem child_elem;        /* List elem for children list */
     int ret_status;                     /* Return status. */

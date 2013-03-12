@@ -116,10 +116,10 @@ main (void)
   kbd_init ();
   input_init ();
 #ifdef USERPROG
-  exception_init ();
-  syscall_init ();
   vm_frame_init ();
   vm_page_init ();
+  exception_init ();
+  syscall_init ();
 #endif
 
   /* Start thread scheduler and enable interrupts. */
