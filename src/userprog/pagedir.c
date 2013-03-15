@@ -41,16 +41,15 @@ pagedir_destroy (uint32_t *pd)
         uint32_t *pte;
         
         for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
-          if (*pte & PTE_P)
-            vm_free_frame (pte_get_page (*pte));
+          if (*pte & PTE_P) {
+            //printf ("Unload on pagedir clear from preset page...\n");
+            vm_free_frame ( pte_get_page (*pte) );
+          }
+          else if(*pte != 0) 
+            vm_free_page ((struct vm_page *)*pte);     
         vm_free_frame (pt);
       }
   vm_free_frame (pd);
-
-  /* We still need to destroy all the pages that are not refreced (eg in swap)
-  and write the data to the disk. Once we use the pagedir to keep track of 
-  pages this will not longer be required. */
-  vm_free_pages ();
 }
 
 /* Returns the address of the page table entry for virtual
@@ -129,6 +128,37 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
     return false;
 }
 
+/* Creates an entry in page directory PD from the user virtual page
+   UPAGE to a pointer to the vm_page structure.
+   UPAGE must not already be mapped. 
+   This way we can obtain the vm_page structure if the page
+   is not installed.
+   Returns true if successful, false if memory allocation
+   failed. */
+bool
+pagedir_add_page (uint32_t *pd, void *upage, void *vm_page)
+{
+  uint32_t *pte;
+
+  ASSERT (pg_ofs (upage) == 0);
+  ASSERT (is_user_vaddr (upage));
+  ASSERT (pd != init_page_dir);
+
+  pte = lookup_page (pd, upage, true);
+
+  if (pte != NULL)
+    {
+      ASSERT ((*pte & PTE_P) == 0);
+
+      //printf (">>>> add %p %p\n", upage, vm_page);
+
+      *pte = (uint32_t)vm_page;
+      return true;
+    }
+  else
+    return false;
+}
+
 /* Looks up the physical address that corresponds to user virtual
    address UADDR in PD.  Returns the kernel virtual address
    corresponding to that physical address, or a null pointer if
@@ -147,10 +177,40 @@ pagedir_get_page (uint32_t *pd, const void *uaddr)
     return NULL;
 }
 
+/* Looks up the physical address that corresponds to user virtual
+   address UADDR in PD. Returns a pointer the the virtual memory
+   page corresponding to UPAGE, or a null pointer if UADDR is 
+   invalid. If the page is not present the pointer to the vm_page
+   structure it's stored in the actual pte. Otherwise it's
+   obtained from the frame table. */
+void *
+pagedir_find_page (uint32_t *pd, const void *uaddr)
+{
+  uint32_t *pte;
+
+  ASSERT (is_user_vaddr (uaddr));
+  
+  pte = lookup_page (pd, uaddr, false);
+  if (pte != NULL)
+    {
+      //printf (">>> %p\n", *pte);
+
+      if ((*pte & PTE_P) != 0)
+        {
+          void *kpage = pte_get_page (*pte) + pg_ofs (uaddr);
+          return vm_frame_get_page (kpage);
+        }
+      else
+        return *pte != 0 ? (void  *)*pte : NULL;
+    }
+  else
+    return NULL;
+}
+
 /* Marks user virtual page UPAGE "not present" in page
    directory PD.  Later accesses to the page will fault.  Other
    bits in the page table entry are preserved.
-   UPAGE need not be mapped. */
+   UPAGE need not be mapped. TO DO: */
 void
 pagedir_clear_page (uint32_t *pd, void *upage) 
 {
@@ -160,9 +220,9 @@ pagedir_clear_page (uint32_t *pd, void *upage)
   ASSERT (is_user_vaddr (upage));
 
   pte = lookup_page (pd, upage, false);
-  if (pte != NULL && (*pte & PTE_P) != 0)
+  if (pte != NULL)
     {
-      *pte &= ~PTE_P;
+      *pte &= 0;
       invalidate_pagedir (pd);
     }
 }

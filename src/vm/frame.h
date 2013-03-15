@@ -20,9 +20,9 @@ struct vm_frame
 void vm_frame_init (void);
 void *vm_get_frame (enum palloc_flags flags);
 void vm_free_frame (void *);
-void vm_free_page (void *);
 bool vm_frame_add_page (void *, void *, uint32_t *);
 bool vm_frame_set_page (void *, struct vm_page *);
+struct vm_page *vm_frame_get_page (void *);
 void vm_frame_pin (void *);
 void vm_frame_unpin (void *);
 

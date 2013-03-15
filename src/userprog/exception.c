@@ -163,7 +163,7 @@ page_fault (struct intr_frame *f)
   fault_page = (void *) (PTE_ADDR & (uint32_t) fault_addr);
 
   //printf ("\n[page fault] at %p in page %d %d %d %d po=%p\n", fault_addr, fault_page, not_present, write, user, f->esp);
-  page = find_page (fault_page);
+  page = vm_find_page (fault_page);
 
   /* Try to write on a read-only page. */
   if (page != NULL && write && !page->writable)

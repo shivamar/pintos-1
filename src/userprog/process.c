@@ -545,10 +545,7 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       page = vm_new_file_page (upage, file, load_ofs, page_read_bytes, 
                                 page_zero_bytes, writable);
       if (page == NULL)
-        {
-          vm_delete_page (page);
-          return false;
-        }
+        return false;
 
       /* Advance. */
       read_bytes -= page_read_bytes;
@@ -571,10 +568,7 @@ setup_stack (void **esp)
   page = vm_new_zero_page (((uint8_t *) PHYS_BASE) - PGSIZE, true); 
 
   if (page == NULL)
-    {
-      vm_delete_page (page);
-      return false;
-    }
+    return false;
   
   *esp = PHYS_BASE;
   vm_load_page (page, ((uint8_t *) PHYS_BASE) - PGSIZE, false);  

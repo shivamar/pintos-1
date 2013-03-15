@@ -172,7 +172,9 @@ sys_create (const char *file, unsigned initial_size)
   if (file == NULL)
     sys_exit (-1);
 
+  lock_acquire (&file_lock);
   int ret = filesys_create (file, initial_size);
+  lock_release (&file_lock);
   return ret;
 }
 
@@ -183,7 +185,10 @@ sys_remove (const char *file)
    if (file == NULL)
      sys_exit (-1);
   
-  return filesys_remove (file);
+  lock_acquire (&file_lock);
+  bool ret = filesys_remove (file);
+  lock_release (&file_lock);
+  return ret;
 }
 
 /* Open a file. */
@@ -196,7 +201,9 @@ sys_open (const char *file)
   if (file == NULL)
     return -1;
 
+  lock_acquire (&file_lock);
   sys_file = filesys_open (file);
+  lock_release (&file_lock);
   if (sys_file == NULL)
     return -1;
 
@@ -274,7 +281,7 @@ sys_read (int fd, void *buffer, unsigned length)
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
-              struct vm_page *page = find_page (tmp_buffer - ofs);
+              struct vm_page *page = vm_find_page (tmp_buffer - ofs);
               
               if (page == NULL && stack_access (esp, tmp_buffer) )
                 page = vm_grow_stack (tmp_buffer - ofs, true);   
@@ -336,7 +343,7 @@ sys_write (int fd, const void *buffer, unsigned length)
           while (rem > 0)
             {
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
-              struct vm_page *page = find_page (tmp_buffer - ofs);
+              struct vm_page *page = vm_find_page (tmp_buffer - ofs);
 
               if (page == NULL && stack_access(esp, tmp_buffer) )
                 page = vm_grow_stack (tmp_buffer - ofs, true);   
@@ -453,7 +460,7 @@ sys_mmap (int fd, void *addr)
         }
   
       /* Fail if there is already a mapped page at the same address. */
-      if ( find_page (tmp_addr) != NULL)
+      if ( vm_find_page (tmp_addr) != NULL)
           return -1;
       
       vm_new_file_page (tmp_addr, file, ofs, read_bytes, zero_bytes, true);
@@ -481,7 +488,7 @@ sys_munmap (mapid_t mapid)
     {
       struct vm_page *page = NULL;
 
-      page = find_page (addr);
+      page = vm_find_page (addr);
       if (page == NULL)
         continue;
 
@@ -490,13 +497,12 @@ sys_munmap (mapid_t mapid)
           vm_pin_page (page);
 
           ASSERT (page->loaded && page->kpage != NULL);
-          vm_unload_page (page, addr);
           vm_free_frame (page->kpage);
           /* We don't really need to unpin the page
           as the holding frame will be deleted when
           we dump the page. */
         } 
-      vm_delete_page (page);
+      vm_free_page (page);
     }
   vm_delete_mfile (mapid);
 }

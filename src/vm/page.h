@@ -2,9 +2,8 @@
 #define VM_PAGE_H
 
 #include <stdbool.h>
-#include <hash.h>
+#include <stddef.h>
 #include "filesys/file.h"
-#include "threads/interrupt.h"
 
 enum vm_page_type
   {
@@ -20,7 +19,6 @@ struct vm_page
   bool writable;
   void *addr;
   void *kpage;
-  struct hash_elem hash_elem;
   uint32_t *pagedir;
 
   struct        
@@ -35,6 +33,8 @@ struct vm_page
   {
     size_t index;
   } swap_data;
+
+  unsigned magic;
 };
 
 struct vm_page *vm_new_file_page (void *, struct file *, off_t, uint32_t, 
@@ -47,14 +47,9 @@ struct vm_page *vm_grow_stack (void *, bool);
 void vm_page_init (void);
 void vm_pin_page (struct vm_page *);
 void vm_unpin_page (struct vm_page *);
-struct vm_page *find_page (void *);
-void vm_delete_page (struct vm_page *);
+struct vm_page *vm_find_page (void *);
+void vm_free_page (struct vm_page *);
 bool stack_access (const void *, void *);
 void vm_free_pages (void);
-
-/* Hash helper functions. */
-unsigned page_hash (const struct hash_elem *, void *UNUSED);
-bool page_less (const struct hash_elem *, const struct hash_elem *, 
-                void *UNUSED);
 
 #endif /* vm/page.h */

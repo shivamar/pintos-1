@@ -13,8 +13,8 @@ static struct hash vm_frames;
 static unsigned frame_hash (const struct hash_elem *, void *);
 static bool frame_less (const struct hash_elem *, const struct hash_elem *, void *);
 static struct vm_frame *find_frame (void *);
-static bool delete_frame (void *);
-static bool eviction (void);
+static void delete_frame (struct vm_frame *);
+static void eviction (void);
 
 /* Initialise the frame table. */
 void
@@ -39,7 +39,7 @@ vm_get_frame (enum palloc_flags flags)
   if (addr != NULL) 
   {
     //printf ("[vm_get_frame] get a frame at address %p %d\n", addr, ++cnt);
-
+  
     struct vm_frame *vf;
     vf = (struct vm_frame *) malloc (sizeof (struct vm_frame) );
 
@@ -64,9 +64,8 @@ vm_get_frame (enum palloc_flags flags)
     sys_t_exit (-1);
 #endif
 
-    ASSERT ( eviction () )
-
-    /* Try again. */
+    /* Evict a frame and try again. */
+    eviction ();
     return vm_get_frame (flags);
   }
 
@@ -78,15 +77,20 @@ vm_get_frame (enum palloc_flags flags)
 void 
 vm_free_frame (void *addr)
 {
-  struct vm_frame *vf = find_frame (addr);
+  lock_acquire (&evict_lock);
+  struct vm_frame *vf = find_frame (addr);  
   
-  if (vf == NULL)
-    return;
+  if (vf == NULL) 
+    {
+      lock_release (&evict_lock);
+      return; 
+    }
   ASSERT (vf->page != NULL);
 
   vm_unload_page (vf->page, vf->addr);
-  delete_frame (addr);
+  delete_frame (vf);
   palloc_free_page (addr);
+  lock_release (&evict_lock);
 }
 
 /* Creates a mapping for the page to the vm_frame. */
@@ -117,29 +121,34 @@ vm_frame_add_page (void *frame, void *uva, uint32_t *pagedir)
   return true;
 }
 
-/* Removes the given page from its frame. */
-static bool
-delete_frame (void *addr)
+/* Obtains a reference to the page struct from a frame. */
+struct vm_page*
+vm_frame_get_page (void *frame)
 {
-  struct vm_frame *vf = find_frame (addr);
-  
-  //printf ("[delete frame] %p\n", vf->addr);
+  //printf ("try to find for %p\n", frame);
 
+  struct vm_frame *vf = find_frame (frame);
   if (vf == NULL)
-    return false;
-  
+    return NULL;
+
+  return vf->page; 
+}
+
+/* Removes the given page from its frame. */
+static void
+delete_frame (struct vm_frame *vf)
+{
+  //printf ("[delete frame] %p\n", vf->addr);
   lock_acquire (&frame_lock);
   hash_delete (&vm_frames, &vf->hash_elem);
   free (vf);
   lock_release (&frame_lock);
 
   --cnt;
-
-  return true;
 }
 
 /* Random choose a page to evict. */
-static bool
+static void
 eviction ()
 {
   struct vm_frame *f = NULL, *victim = NULL;
@@ -152,9 +161,10 @@ eviction ()
       //ASSERT (iteration < 5);
 
       struct hash_iterator it;
-      hash_first (&it, &vm_frames);
       size_t cnt = 0;    
 
+      lock_acquire (&frame_lock);
+      hash_first (&it, &vm_frames);
       while (hash_next (&it))
         {
           f = hash_entry (hash_cur (&it), struct vm_frame, hash_elem);
@@ -173,20 +183,20 @@ eviction ()
           victim = f;
           break;
         }
+      lock_release (&frame_lock);
+
       ++iteration;
 
-      if (iteration > 4) {
+      if (iteration > 3) {
         printf ("At the %d iteration %d pinned out of %d\n", iteration, cnt, hash_size (&vm_frames) );
-        ASSERT (true);
+        ASSERT (false);
       }
     }
 
   //printf ("[Eviction] for frame %p and page %p\n", victim->addr, victim->page->addr);
 
-  vm_free_frame (victim->addr);
   lock_release (&evict_lock);
-
-  return true;
+  vm_free_frame (victim->addr);
 }
 
 /* Pinns the frame at the given address. A pinned frame can;t be evicted. */
