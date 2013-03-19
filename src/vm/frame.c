@@ -1,22 +1,24 @@
 #include "vm/frame.h"
 #include <stdio.h>
-#include <random.h>
 #include "userprog/syscall.h"
 #include "userprog/pagedir.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
-#include "threads/vaddr.h"
 
-#define FRAME_MAGIC 0x3f3c7a3b
-
+/* Synchronization primitives for the frame table. */
 static struct lock frame_lock;
 static struct lock evict_lock;
+/* Hash table of frames for fast lookup. */
 static struct hash vm_frames;
+/* List of frames for the clock eviction algorithm. */
 static struct list vm_frames_list;
 static struct list_elem *e_next;
 
+/* Frame hash table helper functions. */
 static unsigned frame_hash (const struct hash_elem *, void *);
-static bool frame_less (const struct hash_elem *, const struct hash_elem *, void *);
+static bool frame_less (const struct hash_elem *, 
+                        const struct hash_elem *, void *);
+/* Functions for frame lookup and frame delete. */
 static struct vm_frame *find_frame (void *);
 static void delete_frame (struct vm_frame *);
 
@@ -35,13 +37,14 @@ vm_frame_init ()
 {
   lock_init (&frame_lock);
   lock_init (&evict_lock);
-  random_init (0);
   hash_init (&vm_frames, frame_hash, frame_less, NULL);
   list_init (&vm_frames_list);
-  //printf ("frame=%d page=%d\n", sizeof (struct vm_frame), sizeof (struct vm_page) );
 }
 
-/* Looks thourgh all the frames if there is one that contains the required data. */
+/* Sharing - Looks thourgh all the frames if there is one that contains
+   the required data. This function will be called on each page load of
+   a read only file segment. Because is called quite rare we don't need
+   a fast lookup in a hash table and choosed a list for simplicity. */
 void *
 vm_lookup_frame (off_t block_id)
 {
@@ -49,21 +52,21 @@ vm_lookup_frame (off_t block_id)
 
   struct hash_iterator it;
   
+  /* Ensure synchronization with other access on the frame's table. */
   lock_acquire (&frame_lock);
   hash_first (&it, &vm_frames);
   while (hash_next (&it) && addr == NULL)
     {
       struct vm_frame *vf = NULL;
       vf = hash_entry (hash_cur (&it), struct vm_frame, hash_elem);
-      
-      ASSERT (vf->magic == FRAME_MAGIC);
 
+      /* Syncronize with the frame page list. */
       lock_acquire (&vf->list_lock);
       
       struct list_elem *e = list_begin (&vf->pages);
       struct vm_page *page = list_entry (e, struct vm_page, frame_elem);
 
-      /* Takes the first page to see if the frame contains the same data block. */
+      /* Takes a page to see if the frame contains the same data block. */
       if (page->type == FILE && page->file_data.block_id == block_id)
         addr = vf->addr;
 
@@ -80,10 +83,9 @@ vm_get_frame (enum palloc_flags flags)
 {
   void *addr = palloc_get_page (flags);
   
+  /* If memory allocation was successful. */
   if (addr != NULL) 
   {
-    //printf ("[vm_get_frame] get a frame at address %p %d\n", addr, ++cnt);
-  
     struct vm_frame *vf;
     vf = (struct vm_frame *) malloc (sizeof (struct vm_frame) );
 
@@ -94,7 +96,6 @@ vm_get_frame (enum palloc_flags flags)
     /* A new frame will be pinned until the caller will load the data to it.
        This way pe make sure it won't be evicted anytime in between. */
     vf->pinned = true;
-    vf->magic = FRAME_MAGIC;
     list_init (&vf->pages);
     lock_init (&vf->list_lock);
 
@@ -123,7 +124,6 @@ vm_get_frame (enum palloc_flags flags)
 void 
 vm_free_frame (void *addr, uint32_t *pagedir)
 {
-  //printf ("delete frame %p\n", addr);
   lock_acquire (&evict_lock);
   struct vm_frame *vf = find_frame (addr);  
   struct list_elem *e;
@@ -137,7 +137,7 @@ vm_free_frame (void *addr, uint32_t *pagedir)
   if (pagedir == NULL)
     {
       /* Unloads and removes from the list all the pages that share 
-         this frame. */
+         this frame. This will be called when we evict a frame. */
       lock_acquire (&vf->list_lock);
       while (!list_empty (&vf->pages) )
         {
@@ -163,6 +163,8 @@ vm_free_frame (void *addr, uint32_t *pagedir)
         }
     }
 
+  /* If the frames doen't contain any more pages we can free
+     the frame struct. */
   if (list_empty (&vf->pages))
   {
     delete_frame (vf);
@@ -186,14 +188,13 @@ vm_frame_set_page (void *frame, struct vm_page *page)
   return true;
 }
 
-/* Obtains a reference to a page struct from a frame. A page is 
-   uniquely indentified by its pagedir and kernel page. Since a
-   frame can be shared between multiple pages we need to make a
-   unique choice. */
+/* Obtains a reference to a page struct from a frame page list.
+   A page is uniquely indentified by its pagedir and kernel 
+   page. Since a frame can be shared between multiple pages we
+   need to make a unique choice. */
 struct vm_page*
 vm_frame_get_page (void *frame, uint32_t *pagedir)
 {
-  //printf ("try to find for %p\n", frame);
   struct vm_frame *vf = find_frame (frame);
   struct list_elem *e;
 
@@ -216,11 +217,11 @@ vm_frame_get_page (void *frame, uint32_t *pagedir)
   return NULL; 
 }
 
-/* Removes the given page from its frame. */
+/* Removes the given page from its frame. Sets the clock eviction
+   pointer to the next frame. Reclaims memory of the frame struct. */
 static void
 delete_frame (struct vm_frame *vf)
 {
-  //printf ("[delete frame] %p\n", vf->addr);
   lock_acquire (&frame_lock);
 	eviction_remove_pointer (vf);
   hash_delete (&vm_frames, &vf->hash_elem);
@@ -252,9 +253,12 @@ eviction_scan_and_flip (struct vm_frame *vf)
   return true;
 }
 
-/* Second chance algorithm to perform eviction. Looks
-   for a frame to evict which has the accessed bit set
-   to 0. Sets this bit to 0 as it iterates along */
+/* The Clock page replacement algorithm. We keep a circular list
+   where a hadn points to the oldest page. When a page fault occurs
+   we look at the accessed bit. If it's 1 we set it to 0 and move on.
+   This approach has better performance than the second chance 
+   algorithm. For further reference and a more complete explication 
+   see MODERN OPERATING SYSTEMS, [Andrew S. Tanenbaum] page 111. */
 static void
 eviction ()
 {
@@ -268,6 +272,7 @@ eviction ()
 			struct vm_frame *vf = eviction_get_next ();
       ASSERT (vf != NULL);
 
+      /* If the frame is pinned or accessed move on. */
       if (vf->pinned == true || eviction_scan_and_flip(vf) == false)
         {
           eviction_move_next ();
@@ -276,8 +281,6 @@ eviction ()
 
       victim = vf;
     }
-
-  //printf ("[Eviction] for frame %p\n", victim->addr);
 
 	lock_release (&frame_lock);
   lock_release (&evict_lock);
@@ -302,7 +305,8 @@ vm_frame_unpin (void *addr)
     vf->pinned = false;
 }
 
-/* Returns the frame containing the given page, or a null pointer in not found. */
+/* Returns the frame containing the given page, or a null pointer in not 
+   found. */
 static struct vm_frame *
 find_frame (void *addr)
 {
@@ -345,8 +349,6 @@ eviction_remove_pointer (struct vm_frame *victim)
 		return;
 	struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);
 
-  ASSERT (vf->magic == FRAME_MAGIC);
-
 	if (vf == victim)
 		eviction_move_next ();
 }
@@ -359,7 +361,8 @@ eviction_get_next (void)
   	e_next = list_begin (&vm_frames_list);
   if (e_next != NULL)
     {
-		  struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);	
+      /* Get the frame struct from the frame list. */
+		  struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);
       return vf;
     }  
 

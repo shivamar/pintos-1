@@ -13,9 +13,9 @@ static struct block *swap_block;
 static struct lock swap_lock;
 
 static struct bitmap *swap_map;
+static unsigned swap_size;
 
-static size_t swap_size = 0;
-
+/* Initialise swap table. */
 void
 vm_swap_init ()
 {
@@ -35,6 +35,7 @@ vm_swap_load (size_t index, void *addr)
   size_t ofs; 
   for (ofs = 0; ofs < BLOCKS_PER_PAGE; ++ofs)
     {
+      /* Make sure the index is valid. */
       ASSERT (index < swap_size);
       ASSERT ( bitmap_test (swap_map, index) );
 
@@ -53,11 +54,13 @@ vm_swap_store (void *addr)
   lock_acquire (&swap_lock);
   size_t index = bitmap_scan_and_flip (swap_map, 0, BLOCKS_PER_PAGE, false);
 
+  /* We must have a page at the given index. */
   ASSERT (index != BITMAP_ERROR);
 
   size_t ofs, ind = index;
   for (ofs = 0; ofs < BLOCKS_PER_PAGE; ++ofs)
     {
+      /* Make sure the index is valid. */
       ASSERT (index < swap_size);
       ASSERT ( bitmap_test (swap_map, ind) );
 
@@ -78,6 +81,7 @@ vm_swap_free (size_t index)
   size_t ofs;
   for (ofs = 0; ofs < BLOCKS_PER_PAGE; ++ofs)
     {
+      /* Make sure the index is valid. */
       ASSERT (index < swap_size);
       ASSERT ( bitmap_test (swap_map, index) );
 

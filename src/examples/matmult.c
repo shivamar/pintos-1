@@ -26,7 +26,7 @@
   4,096   196,608 kB
   8,192   786,432 kB
  16,384 3,145,728 kB */
-#define DIM 128
+#define DIM 512 
 
 int A[DIM][DIM];
 int B[DIM][DIM];
@@ -37,13 +37,15 @@ main (void)
 {
   int i, j, k;
 
+  printf ("Will multiply %d matrices\n", DIM);
+
   /* Initialize the matrices. */
   for (i = 0; i < DIM; i++)
     for (j = 0; j < DIM; j++)
       {
-	A[i][j] = i;
-	B[i][j] = j;
-	C[i][j] = 0;
+	      A[i][j] = i;
+	      B[i][j] = j;
+	      C[i][j] = 0;
       }
 
   /* Multiply matrices. */
@@ -53,5 +55,6 @@ main (void)
 	C[i][j] += A[i][k] * B[k][j];
 
   /* Done. */
+  printf ("Matrix multiplication OK\n");
   exit (C[DIM - 1][DIM - 1]);
 }

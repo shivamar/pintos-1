@@ -17,7 +17,9 @@ struct vm_mfile
                                  /* multiple pages. */
   };
 
+/* Initialise the memory mapped files table. */
 void vm_mfile_init (void);
+/* Memory mapped files functions. */
 struct vm_mfile *vm_find_mfile (mapid_t);
 void vm_insert_mfile (mapid_t, int, void *, void *);
 bool vm_delete_mfile (mapid_t);

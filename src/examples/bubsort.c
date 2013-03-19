@@ -7,9 +7,11 @@
    Ideally, we could read the unsorted array off of the file
    system, and store the result back to the file system! */
 #include <stdio.h>
+#include <random.h>
 
 /* Size of array to sort. */
 #define SORT_SIZE 128
+#define MAX_ELEM 1024
 
 int
 main (void)
@@ -19,9 +21,10 @@ main (void)
 
   int i, j, tmp;
 
+  random_init (0);
   /* First initialize the array in descending order. */
   for (i = 0; i < SORT_SIZE; i++)
-    array[i] = SORT_SIZE - i - 1;
+    array[i] = (int)(random_ulong() % MAX_ELEM);
 
   printf ("before sort we have:");
   for (i = 0; i < 10; ++i)

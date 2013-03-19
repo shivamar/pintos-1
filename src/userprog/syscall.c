@@ -272,12 +272,23 @@ sys_read (int fd, void *buffer, unsigned length)
         ret = -1;
       else
         {
+          /* We read into the buffer one page at a time. Before the actual 
+             read we need to make sure the page it's loaded and pin it's 
+             underlying frame. We have to prevent a page fault while a device
+             driver access a user driver. Loading one page at a time protects
+             the OS from malicious programs that could try to pin all the 
+             frames at a given time. */
+
           size_t rem = length;
           void *tmp_buffer = (void *)buffer;
 
           ret = 0;
           while (rem > 0)
             {
+              /* Round down the buffer address to a page and try to find a
+                 static page. If we don't find the page we migth have stack
+                 growth. If we find the page we only need to load if is not
+                 present in memory. */
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
               struct vm_page *page = vm_find_page (tmp_buffer - ofs);
               
@@ -290,7 +301,8 @@ sys_read (int fd, void *buffer, unsigned length)
               if ( !page->loaded )
                 vm_load_page (page, true);
 
-              size_t read_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              size_t read_bytes = ofs + rem > PGSIZE ?
+                                  rem - (ofs + rem - PGSIZE) : rem;
               lock_acquire (&file_lock);
 
               ASSERT (page->loaded);
@@ -300,6 +312,7 @@ sys_read (int fd, void *buffer, unsigned length)
               rem -= read_bytes;
               tmp_buffer += read_bytes;
 
+              /* Unpin the frame after we are done. */
               vm_frame_unpin (page->kpage);
             }
         }
@@ -332,12 +345,16 @@ sys_write (int fd, const void *buffer, unsigned length)
         ret = -1;
       else
         {
+          /* We write from the buffer one page at a time. The reason behind 
+             this approach is highlighted above. */
+
           size_t rem = length;
           void *tmp_buffer = (void *)buffer;
 
           ret = 0;
           while (rem > 0)
             {
+              /* See sys_read for a detailed explanation of page loading. */
               size_t ofs = tmp_buffer - pg_round_down (tmp_buffer);
               struct vm_page *page = vm_find_page (tmp_buffer - ofs);
 
@@ -350,7 +367,8 @@ sys_write (int fd, const void *buffer, unsigned length)
               if ( !page->loaded )
                 vm_load_page (page, true);
 
-              size_t write_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
+              size_t write_bytes = ofs + rem > PGSIZE ? 
+                                   rem - (ofs + rem - PGSIZE) : rem;
               lock_acquire (&file_lock);
 
               ASSERT (page->loaded);
@@ -360,6 +378,7 @@ sys_write (int fd, const void *buffer, unsigned length)
               rem -= write_bytes;
               tmp_buffer += write_bytes;
               
+              /* Unpin the frame after we are done. */
               vm_frame_unpin (page->kpage);
             }
         }
@@ -425,11 +444,13 @@ sys_mmap (int fd, void *addr)
   size_t size;
   struct file *file;
 
+  /* Open again the file to obtain a new reference. */
   size = sys_filesize(fd);
   lock_acquire (&file_lock);
   file = file_reopen ( file_by_fid (fd)->file );
   lock_release (&file_lock);  
 
+  /* Check for validity. For more detail see spec 5.3.4. */
   if (size <= 0 || file == NULL)
     return -1;
   if (addr == NULL || addr == 0x0 || pg_ofs (addr) != 0)
@@ -439,6 +460,9 @@ sys_mmap (int fd, void *addr)
 
   size_t ofs = 0;
   void *tmp_addr = addr;
+
+  /* Divide the file into pages and create a new file page
+     with the corresponding offset for each of them. */
   while (size > 0)
     {
       size_t read_bytes;
@@ -460,6 +484,8 @@ sys_mmap (int fd, void *addr)
           return -1;
       
       vm_new_file_page (tmp_addr, file, ofs, read_bytes, zero_bytes, true, -1);
+      
+      /* Move on. */
       ofs += PGSIZE;
       size -= read_bytes;
       tmp_addr += PGSIZE;
@@ -480,6 +506,8 @@ sys_munmap (mapid_t mapid)
     sys_exit (-1);
 
   void *addr = mf->start_addr;
+
+  /* Free each page mapped in memory for the given file. */
   for (;addr < mf->end_addr; addr += PGSIZE)
     {
       struct vm_page *page = NULL;
@@ -546,6 +574,8 @@ sys_t_exit (int status)
   sys_exit (status);
 }
 
+/* Extern function to use the file_lock. Used to synchronize access
+   on virtual page unloading. */
 void
 sys_t_filelock (int acquire)
 {

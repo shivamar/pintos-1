@@ -3,5 +3,6 @@ cscope.out
 TAGS
 tags
 spec/*
-examples/*
+src/examples/*
 *.o
+*.dsk

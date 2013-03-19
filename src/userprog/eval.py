@@ -25,7 +25,7 @@ tests_name[8] = "File System"
 
 # actual tests
 tests = {}
-tests[1] = ["args-dbl-space", "args-many", "args-multiple", "args-none", "args-single"] 
+tests[1] = ["args-dbl-space", "args-many", "args-multiple", "args-none", "args-single"]
 tests[2] = ["bad-jump", "bad-jump2", "bad-read", "bad-read2", "bad-write", "bad-write2"]
 tests[3] = ["wait-bad-pid", "wait-killed", "wait-simple", "wait-twice"]
 tests[4] = ["exec-arg", "exec-bad-ptr", "exec-missing", "exec-multiple", "exec-once", "no-vm/multi-oom"]
@@ -106,12 +106,12 @@ def help():
     print 'all -> make clean & make all'
     print 'clean -> make clean'
     print 'make -> make all'
-    
+
     print ''
     print "Test cases covered"
     for index in xrange(1, len(tests) + 1):
         print "\t" + str(index) + ' -> run all ' + tests_name[index] + ' tests'
-        index += 1     
+        index += 1
     print ''
     print 'example usage: "eval.py all 1 2"'
 
@@ -127,7 +127,7 @@ if __name__ == '__main__':
 
     for i in range(0, len(args)):
         case = int(args[i]) if is_number(args[i]) else -1
- 
+
         if args[i] == 'd' or args[i] == 'v' or args[i] == 'verbose' or args[i] == 'debug':
             debug = True
             continue
@@ -158,5 +158,5 @@ if __name__ == '__main__':
         if stats.total == stats.ok:
             print color_white + 'Passed ALL Tests!' + color_end
         else:
-            print color_white + 'Passed ' + str(stats.ok) + ' out of ' + str(stats.total) + ' Tests!' 
+            print color_white + 'Passed ' + str(stats.ok) + ' out of ' + str(stats.total) + ' Tests!'
 

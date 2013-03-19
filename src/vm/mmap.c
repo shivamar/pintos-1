@@ -40,6 +40,7 @@ vm_delete_mfile (mapid_t mapid)
   if (mf == NULL)
     return false;
 
+  /* Remove the given file from the hash table. */
   lock_acquire (&mfile_lock);
   hash_delete (&vm_mfiles, &mf->hash_elem);
   list_remove (&mf->thread_elem);
@@ -60,6 +61,7 @@ vm_insert_mfile (mapid_t mapid, int fid, void *start_addr, void *end_addr)
   mf->start_addr = start_addr;
   mf->end_addr = end_addr;
 
+  /* Insert the new file in the hash table. */
   lock_acquire (&mfile_lock);
   list_push_back (&thread_current ()->mfiles, &mf->thread_elem);
   hash_insert (&vm_mfiles, &mf->hash_elem);
