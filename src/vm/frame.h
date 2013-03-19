@@ -13,6 +13,7 @@ struct vm_frame
     struct hash_elem hash_elem; /* Hash element for the hash frame table. */
     struct list pages;          /* A list of the pages that share this frame. */
     struct lock list_lock;      /* A lock to synchronize access to page list. */
+	struct list_elem list_elem; /* List element for frame list. */
   };
 
 /* Public functions of the frame table. */

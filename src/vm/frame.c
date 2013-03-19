@@ -9,6 +9,8 @@
 static struct lock frame_lock;
 static struct lock evict_lock;
 static struct hash vm_frames;
+static struct list vm_frames_list;
+static struct list_elem *e_next;
 
 static unsigned frame_hash (const struct hash_elem *, void *);
 static bool frame_less (const struct hash_elem *, const struct hash_elem *, void *);
@@ -19,6 +21,10 @@ static void delete_frame (struct vm_frame *);
 static bool eviction_scan_and_flip (struct vm_frame *);
 static void eviction (void);
 
+/* Clock algorithm helper functions. */
+static void eviction_remove_pointer (struct vm_frame *);
+static struct vm_frame *eviction_get_next (void);
+
 /* Initialise the frame table. */
 void
 vm_frame_init ()
@@ -27,7 +33,7 @@ vm_frame_init ()
   lock_init (&evict_lock);
   random_init (0);
   hash_init (&vm_frames, frame_hash, frame_less, NULL);
-
+  list_init (&vm_frames_list);
   //printf ("frame=%d page=%d\n", sizeof (struct vm_frame), sizeof (struct vm_page) );
 }
 
@@ -88,6 +94,7 @@ vm_get_frame (enum palloc_flags flags)
     lock_init (&vf->list_lock);
 
     lock_acquire (&frame_lock);
+		list_push_back (&vm_frames_list, &vf->list_elem);
     hash_insert (&vm_frames, &vf->hash_elem);   
     lock_release (&frame_lock);
   }
@@ -210,8 +217,10 @@ delete_frame (struct vm_frame *vf)
 {
   //printf ("[delete frame] %p\n", vf->addr);
   lock_acquire (&frame_lock);
+	eviction_remove_pointer (vf);
   hash_delete (&vm_frames, &vf->hash_elem);
-  free (vf);
+	list_remove (&vf->list_elem);
+	free (vf);
   lock_release (&frame_lock);
 }
 
@@ -244,42 +253,29 @@ eviction_scan_and_flip (struct vm_frame *vf)
 static void
 eviction ()
 {
-  struct vm_frame *f = NULL, *victim = NULL;
+  struct vm_frame *victim = NULL;
 
   lock_acquire (&evict_lock);
+	lock_acquire (&frame_lock);
 
-  size_t iteration = 0;
+  //size_t iteration = 0;
   while (victim == NULL)
     {
-      struct hash_iterator it;
-      size_t cnt = 0;    
+			struct vm_frame *f = eviction_get_next ();
 
-      lock_acquire (&frame_lock);
-      hash_first (&it, &vm_frames);
-      while (hash_next (&it))
-        {
-          f = hash_entry (hash_cur (&it), struct vm_frame, hash_elem);
-          if (f->pinned == true)
-            { ++cnt; continue; }  
+      if (eviction_scan_and_flip(f) == false)
+      	continue;      
 
-          if (eviction_scan_and_flip(f) == false)
-            continue;      
-
-          victim = f;
-          break;
-        }
-      lock_release (&frame_lock);
-
-      ++iteration;
-
-      if (iteration > 3) {
-        printf ("At the %d iteration %d pinned out of %d\n", iteration, cnt, hash_size (&vm_frames) );
-        ASSERT (false);
-      }
+      victim = f;
+      //if (iteration > 500) {
+      //  printf ("At the %d iteration %d pinned out of %d\n", iteration, cnt, hash_size (&vm_frames) );
+      //  ASSERT (false);
+      //}
     }
 
   //printf ("[Eviction] for frame %p and page %p\n", victim->addr, victim->page->addr);
 
+	lock_release (&frame_lock);
   lock_release (&evict_lock);
   vm_free_frame (victim->addr, NULL);
 }
@@ -333,4 +329,27 @@ frame_less (const struct hash_elem *a_, const struct hash_elem *b_,
   const struct vm_frame *b = hash_entry (b_, struct vm_frame, hash_elem);
   
   return a->addr < b->addr;
+}
+
+/* Sets the eviction pointer to the next frame from the frame list. */
+static void
+eviction_remove_pointer (struct vm_frame *victim)
+{
+	if (e_next == NULL)
+		return;
+	struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);
+	if (vf == victim)
+		e_next = (e_next != list_end (&vm_frames_list) ? 
+												list_next (e_next) : NULL);
+}
+
+/* Returns the next frame to be evicted. */
+static struct vm_frame *
+eviction_get_next (void)
+{
+	if (e_next == NULL)
+		e_next = list_begin (&vm_frames_list);
+	if (e_next != NULL)
+		return list_entry (e_next, struct vm_frame, list_elem);	
+	return NULL;
 }
