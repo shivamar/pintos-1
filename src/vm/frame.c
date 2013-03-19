@@ -5,6 +5,9 @@
 #include "userprog/pagedir.h"
 #include "threads/malloc.h"
 #include "threads/synch.h"
+#include "threads/vaddr.h"
+
+#define FRAME_MAGIC 0x3f3c7a3b
 
 static struct lock frame_lock;
 static struct lock evict_lock;
@@ -24,6 +27,7 @@ static void eviction (void);
 /* Clock algorithm helper functions. */
 static void eviction_remove_pointer (struct vm_frame *);
 static struct vm_frame *eviction_get_next (void);
+static void eviction_move_next (void);
 
 /* Initialise the frame table. */
 void
@@ -36,8 +40,6 @@ vm_frame_init ()
   list_init (&vm_frames_list);
   //printf ("frame=%d page=%d\n", sizeof (struct vm_frame), sizeof (struct vm_page) );
 }
-
-static int cnt = 0;
 
 /* Looks thourgh all the frames if there is one that contains the required data. */
 void *
@@ -54,6 +56,8 @@ vm_lookup_frame (off_t block_id)
       struct vm_frame *vf = NULL;
       vf = hash_entry (hash_cur (&it), struct vm_frame, hash_elem);
       
+      ASSERT (vf->magic == FRAME_MAGIC);
+
       lock_acquire (&vf->list_lock);
       
       struct list_elem *e = list_begin (&vf->pages);
@@ -66,7 +70,7 @@ vm_lookup_frame (off_t block_id)
       lock_release (&vf->list_lock);
     }
   lock_release (&frame_lock);
-
+  
   return addr;
 }
 
@@ -90,6 +94,7 @@ vm_get_frame (enum palloc_flags flags)
     /* A new frame will be pinned until the caller will load the data to it.
        This way pe make sure it won't be evicted anytime in between. */
     vf->pinned = true;
+    vf->magic = FRAME_MAGIC;
     list_init (&vf->pages);
     lock_init (&vf->list_lock);
 
@@ -226,7 +231,7 @@ delete_frame (struct vm_frame *vf)
 
 /* Iterates over all the pages which are sharing the given frame.
    Looks at the accesed bit of each page. If all of them are 0 
-   then we have found a vitim frame, otherwise flip the first 1
+   then we have found a victim frame, otherwise flip the first 1
    bit and continue. Synchronization must be done by the caller.*/
 static bool
 eviction_scan_and_flip (struct vm_frame *vf)
@@ -258,22 +263,21 @@ eviction ()
   lock_acquire (&evict_lock);
 	lock_acquire (&frame_lock);
 
-  //size_t iteration = 0;
   while (victim == NULL)
     {
-			struct vm_frame *f = eviction_get_next ();
+			struct vm_frame *vf = eviction_get_next ();
+      ASSERT (vf != NULL);
 
-      if (eviction_scan_and_flip(f) == false)
-      	continue;      
+      if (vf->pinned == true || eviction_scan_and_flip(vf) == false)
+        {
+          eviction_move_next ();
+      	  continue;  
+        }    
 
-      victim = f;
-      //if (iteration > 500) {
-      //  printf ("At the %d iteration %d pinned out of %d\n", iteration, cnt, hash_size (&vm_frames) );
-      //  ASSERT (false);
-      //}
+      victim = vf;
     }
 
-  //printf ("[Eviction] for frame %p and page %p\n", victim->addr, victim->page->addr);
+  //printf ("[Eviction] for frame %p\n", victim->addr);
 
 	lock_release (&frame_lock);
   lock_release (&evict_lock);
@@ -331,25 +335,44 @@ frame_less (const struct hash_elem *a_, const struct hash_elem *b_,
   return a->addr < b->addr;
 }
 
-/* Sets the eviction pointer to the next frame from the frame list. */
+/* Sets the eviction pointer to the next frame from the frame list. 
+   This function will be called when we delete a frame so we don't
+   end up with a dangling pointer. */
 static void
 eviction_remove_pointer (struct vm_frame *victim)
 {
-	if (e_next == NULL)
+	if (e_next == NULL || e_next == list_end (&vm_frames_list) )
 		return;
 	struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);
+
+  ASSERT (vf->magic == FRAME_MAGIC);
+
 	if (vf == victim)
-		e_next = (e_next != list_end (&vm_frames_list) ? 
-												list_next (e_next) : NULL);
+		eviction_move_next ();
 }
 
 /* Returns the next frame to be evicted. */
 static struct vm_frame *
 eviction_get_next (void)
 {
-	if (e_next == NULL)
-		e_next = list_begin (&vm_frames_list);
-	if (e_next != NULL)
-		return list_entry (e_next, struct vm_frame, list_elem);	
-	return NULL;
+	if (e_next == NULL || e_next == list_end (&vm_frames_list) )
+  	e_next = list_begin (&vm_frames_list);
+  if (e_next != NULL)
+    {
+		  struct vm_frame *vf = list_entry (e_next, struct vm_frame, list_elem);	
+      return vf;
+    }  
+
+  NOT_REACHED ();
+}
+
+/* Moves the clock pointer to the next frame. If we reached the end
+   we start again from the beginning like in a circular list. */
+static void
+eviction_move_next (void)
+{
+  if (e_next == NULL || e_next == list_end (&vm_frames_list) )
+    e_next = list_begin (&vm_frames_list);
+  else
+    e_next = list_next (e_next); 
 }

@@ -173,7 +173,7 @@ page_fault (struct intr_frame *f)
     {
       //printf ("[Page fault load] rb=%d zb=%d writable=%d page=%d\n", page->file_data.read_bytes, page->file_data.zero_bytes, page->writable, page->addr);
 
-      if ( !vm_load_page (page, fault_page, false) )
+      if ( !vm_load_page (page, false) )
         sys_t_exit (-1);
       
       return;

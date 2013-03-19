@@ -5,7 +5,6 @@
 #include "filesys/filesys.h"
 #include "filesys/inode.h"
 #include "threads/malloc.h"
-#include "threads/thread.h"
 
 /* A directory. */
 struct dir 
@@ -124,16 +123,6 @@ dir_lookup (const struct dir *dir, const char *name,
 
   ASSERT (dir != NULL);
   ASSERT (name != NULL);
-
-  /* Weird behavior experienced on my laptop. The length of the 
-     inode of the root directory appears to be a negative value when
-     running the page-merge-par testcase when opening "buf4" file.
-     Because of that the test fail. This hack seems to fix it. 
-     I don't experience this bug on any lab machine so it appears
-     to be a heissen bug. Also I random add some printf around here
-     it works also :) */ 
-  while (inode_length (dir->inode) < 0)
-    thread_yield ();
 
   if (lookup (dir, name, &e, NULL))
     *inode = inode_open (e.inode_sector);

@@ -78,7 +78,6 @@ lookup_page (uint32_t *pd, const void *vaddr, bool create)
           pt = palloc_get_page (PAL_ZERO);
           if (pt == NULL) 
             return NULL; 
-      
           *pde = pde_create (pt);
         }
       else
@@ -87,6 +86,7 @@ lookup_page (uint32_t *pd, const void *vaddr, bool create)
 
   /* Return the page table entry. */
   pt = pde_get_pt (*pde);
+
   return &pt[pt_no (vaddr)];
 }
 
@@ -144,9 +144,6 @@ pagedir_add_page (uint32_t *pd, void *upage, void *vm_page)
   if (pte != NULL)
     {
       ASSERT ((*pte & PTE_P) == 0);
-
-      //printf (">>>> add %p %p\n", upage, vm_page);
-
       *pte = (uint32_t)vm_page;
       return true;
     }

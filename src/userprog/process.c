@@ -576,12 +576,11 @@ setup_stack (void **esp)
   struct vm_page *page = NULL;
 
   page = vm_new_zero_page (((uint8_t *) PHYS_BASE) - PGSIZE, true); 
-
   if (page == NULL)
     return false;
   
   *esp = PHYS_BASE;
-  vm_load_page (page, ((uint8_t *) PHYS_BASE) - PGSIZE, false);  
+  vm_load_page (page, false);  
 
   return true;
 }

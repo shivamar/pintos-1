@@ -134,7 +134,7 @@ vm_unpin_page (struct vm_page *page)
    operation and makes sure the frame won't be evicted by
    another thread in meantime. */
 bool 
-vm_load_page (struct vm_page *page, void *uva, bool pinned)
+vm_load_page (struct vm_page *page, bool pinned)
 {
   /* For debug. */
   ASSERT (page->magic == PAGE_MAGIC);
@@ -170,19 +170,20 @@ vm_load_page (struct vm_page *page, void *uva, bool pinned)
     }
 
   //printf ("Find a page (%p) (%p)\n", vm_find_page (page->addr), (void *)page );
+  ASSERT ( is_kernel_vaddr (page->kpage) );
 
-  pagedir_clear_page (page->pagedir, uva);
-  if (!pagedir_set_page (page->pagedir, uva, page->kpage, page->writable) )
+  pagedir_clear_page (page->pagedir, page->addr);
+  if (!pagedir_set_page (page->pagedir, page->addr, page->kpage, page->writable) )
     {
       ASSERT (false);
       vm_frame_unpin (page->kpage);
       return false;
     }
 
-  ASSERT ( pagedir_get_page (page->pagedir, uva) );
+  ASSERT ( pagedir_get_page (page->pagedir, page->addr) );
 
-  pagedir_set_dirty (page->pagedir, uva, false);
-  pagedir_set_accessed (page->pagedir, uva, true);
+  pagedir_set_dirty (page->pagedir, page->addr, false);
+  pagedir_set_accessed (page->pagedir, page->addr, true);
 
   page->loaded = true;
   /* On succes we leave the frame pinned if the caller wants so. */
@@ -265,7 +266,7 @@ struct vm_page *
 vm_grow_stack (void *uva, bool pinned)
 {
   struct vm_page *page = vm_new_zero_page (uva, true);
-  if ( !vm_load_page (page, uva, pinned) )
+  if ( !vm_load_page (page, pinned) )
     return NULL;
 
   return page;

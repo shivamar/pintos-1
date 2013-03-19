@@ -288,7 +288,7 @@ sys_read (int fd, void *buffer, unsigned length)
 
               /* Load the page and pin the frame. */
               if ( !page->loaded )
-                vm_load_page (page, tmp_buffer - ofs, true);
+                vm_load_page (page, true);
 
               size_t read_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
               lock_acquire (&file_lock);
@@ -348,7 +348,7 @@ sys_write (int fd, const void *buffer, unsigned length)
 
               /* Load the page and pin the frame. */
               if ( !page->loaded )
-                vm_load_page (page, tmp_buffer - ofs, true);
+                vm_load_page (page, true);
 
               size_t write_bytes = ofs + rem > PGSIZE ? rem - (ofs + rem - PGSIZE) : rem;
               lock_acquire (&file_lock);

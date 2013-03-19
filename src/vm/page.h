@@ -44,7 +44,7 @@ struct vm_page *vm_new_file_page (void *, struct file *, off_t, uint32_t,
                                   uint32_t, bool, off_t);
 struct vm_page *vm_new_swap_page (void *, size_t, bool);
 struct vm_page *vm_new_zero_page (void *, bool);
-bool vm_load_page (struct vm_page *, void *, bool);
+bool vm_load_page (struct vm_page *, bool);
 void vm_unload_page (struct vm_page *, void *);
 struct vm_page *vm_grow_stack (void *, bool);
 void vm_page_init (void);
