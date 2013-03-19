@@ -43,13 +43,13 @@ pagedir_destroy (uint32_t *pd)
         for (pte = pt; pte < pt + PGSIZE / sizeof *pte; pte++)
           if (*pte & PTE_P) {
             //printf ("Unload on pagedir clear from preset page...\n");
-            vm_free_frame ( pte_get_page (*pte) );
+            vm_free_frame ( pte_get_page (*pte), pd);
           }
           else if(*pte != 0) 
             vm_free_page ((struct vm_page *)*pte);     
-        vm_free_frame (pt);
+        vm_free_frame (pt, pd);
       }
-  vm_free_frame (pd);
+  vm_free_frame (pd, pd);
 }
 
 /* Returns the address of the page table entry for virtual
@@ -117,11 +117,6 @@ pagedir_set_page (uint32_t *pd, void *upage, void *kpage, bool writable)
     {
       ASSERT ((*pte & PTE_P) == 0);
       *pte = pte_create_user (kpage, writable);
-
-      /* Create a mapping from the user virtual page UPAGE 
-         to the vm_frame identified as KPAGE.
-         TO DO: check for failure. */
-      vm_frame_add_page (kpage, upage, pd);
       return true;
     }
   else
@@ -193,12 +188,10 @@ pagedir_find_page (uint32_t *pd, const void *uaddr)
   pte = lookup_page (pd, uaddr, false);
   if (pte != NULL)
     {
-      //printf (">>> %p\n", *pte);
-
       if ((*pte & PTE_P) != 0)
         {
           void *kpage = pte_get_page (*pte) + pg_ofs (uaddr);
-          return vm_frame_get_page (kpage);
+          return vm_frame_get_page (kpage, pd);
         }
       else
         return *pte != 0 ? (void  *)*pte : NULL;

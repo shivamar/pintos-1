@@ -256,11 +256,9 @@ sys_read (int fd, void *buffer, unsigned length)
 
   if (fd == STDIN_FILENO)
     {
-      lock_acquire (&file_lock);
       unsigned i;
       for (i = 0; i < length; ++i)
         *(uint8_t *)(buffer + i) = input_getc ();
-      lock_release (&file_lock);
       ret = length;
     }
   else if (fd == STDOUT_FILENO)
@@ -322,9 +320,7 @@ sys_write (int fd, const void *buffer, unsigned length)
     ret = -1;
   else if (fd == STDOUT_FILENO)
     {
-      lock_acquire (&file_lock);
       putbuf (buffer, length);
-      lock_release (&file_lock);
       ret = length;
     }
   else if ( !is_user_vaddr (buffer) || !is_user_vaddr (buffer + length) )
@@ -463,7 +459,7 @@ sys_mmap (int fd, void *addr)
       if ( vm_find_page (tmp_addr) != NULL)
           return -1;
       
-      vm_new_file_page (tmp_addr, file, ofs, read_bytes, zero_bytes, true);
+      vm_new_file_page (tmp_addr, file, ofs, read_bytes, zero_bytes, true, -1);
       ofs += PGSIZE;
       size -= read_bytes;
       tmp_addr += PGSIZE;
@@ -497,7 +493,7 @@ sys_munmap (mapid_t mapid)
           vm_pin_page (page);
 
           ASSERT (page->loaded && page->kpage != NULL);
-          vm_free_frame (page->kpage);
+          vm_free_frame (page->kpage, page->pagedir);
           /* We don't really need to unpin the page
           as the holding frame will be deleted when
           we dump the page. */

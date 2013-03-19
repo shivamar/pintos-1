@@ -343,3 +343,12 @@ inode_length (const struct inode *inode)
 {
   return inode->data.length;
 }
+
+/* Returns the block sector that contains the given position 
+   within an inode. Used to uniquely identify both inode and
+   the given offset. */
+off_t
+inode_get_block_number (const struct inode *inode, off_t offset)
+{
+  return byte_to_sector (inode, offset);
+}

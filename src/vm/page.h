@@ -1,6 +1,7 @@
 #ifndef VM_PAGE_H
 #define VM_PAGE_H
 
+#include <list.h>
 #include <stdbool.h>
 #include <stddef.h>
 #include "filesys/file.h"
@@ -20,6 +21,7 @@ struct vm_page
   void *addr;
   void *kpage;
   uint32_t *pagedir;
+  struct list_elem frame_elem;
 
   struct        
   {
@@ -27,6 +29,7 @@ struct vm_page
     off_t ofs;
     size_t read_bytes;
     size_t zero_bytes;
+    off_t block_id;
   } file_data;
 
   struct
@@ -38,7 +41,7 @@ struct vm_page
 };
 
 struct vm_page *vm_new_file_page (void *, struct file *, off_t, uint32_t, 
-                                  uint32_t, bool);
+                                  uint32_t, bool, off_t);
 struct vm_page *vm_new_swap_page (void *, size_t, bool);
 struct vm_page *vm_new_zero_page (void *, bool);
 bool vm_load_page (struct vm_page *, void *, bool);

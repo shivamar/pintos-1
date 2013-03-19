@@ -34,7 +34,7 @@ static int cnt = 0;
 /* Creates a new page from a file segment. */
 struct vm_page*
 vm_new_file_page (void *addr, struct file *file, off_t ofs, size_t read_bytes,
-                  size_t zero_bytes, bool writable)
+                  size_t zero_bytes, bool writable, off_t block_id)
 {
   struct vm_page *page = (struct vm_page*) malloc (sizeof (struct vm_page));
   
@@ -50,8 +50,10 @@ vm_new_file_page (void *addr, struct file *file, off_t ofs, size_t read_bytes,
   page->file_data.ofs = ofs;
   page->file_data.read_bytes = read_bytes;
   page->file_data.zero_bytes = zero_bytes;
+  page->file_data.block_id = block_id;
   page->writable = writable;
   page->loaded = false;
+  page->kpage = NULL;
   page->magic = PAGE_MAGIC;
 
   add_page (page);
@@ -76,6 +78,7 @@ vm_new_swap_page (void *addr, size_t index, bool writable)
   page->swap_data.index = index;
   page->writable = writable;
   page->loaded = false;
+  page->kpage = NULL;
   page->magic = PAGE_MAGIC;
 
   add_page (page);
@@ -98,7 +101,8 @@ vm_new_zero_page (void *addr, bool writable)
   page->addr = addr;
   page->pagedir = thread_current ()->pagedir;
   page->writable = writable;
-  page->loaded = false;  
+  page->loaded = false;
+  page->kpage = NULL;  
   page->magic = PAGE_MAGIC;
 
   add_page (page);
@@ -132,16 +136,22 @@ vm_unpin_page (struct vm_page *page)
 bool 
 vm_load_page (struct vm_page *page, void *uva, bool pinned)
 {
-  /* Fr debug. */
+  /* For debug. */
   ASSERT (page->magic == PAGE_MAGIC);
 
   /* Get a frame of memory. */
   lock_acquire (&load_lock);
-  page->kpage = vm_get_frame (PAL_USER);
+  
+  /* If we have a read-only file try to look for a frame if any
+     that contains the same data. */
+  if (page->type == FILE && page->file_data.block_id != -1)
+    page->kpage = vm_lookup_frame (page->file_data.block_id);
+  /* Otherwise obtain an empty frame from the frame table. */
+  if (page->kpage == NULL)
+    page->kpage = vm_get_frame (PAL_USER);
+
   lock_release (&load_lock);
   vm_frame_set_page (page->kpage, page);
-
-  //printf ("\nPage load for %p %p type=%d\n", page->addr, page->pagedir, page->type);
 
   ASSERT (page->kpage != NULL);
 
@@ -191,11 +201,10 @@ vm_unload_page (struct vm_page *page, void *kpage)
   if (page->type == FILE && pagedir_is_dirty (page->pagedir, page->addr) &&
       file_writable (page->file_data.file) == false)
     {
-      //printf ("Unload %d %s..\n", ++cnt2, t->name);
-
       /* Write the page back to the file. */
       vm_frame_pin (kpage);
       sys_t_filelock (true);
+
       file_seek (page->file_data.file, page->file_data.ofs);
       file_write (page->file_data.file, kpage, page->file_data.read_bytes);
       sys_t_filelock (false);
@@ -228,7 +237,7 @@ vm_load_file_page (uint8_t *kpage, struct vm_page *page)
    
   if (ret != page->file_data.read_bytes)
     {
-      vm_free_frame (kpage);
+      vm_free_frame (kpage, page->pagedir);
       return false;
     }
   

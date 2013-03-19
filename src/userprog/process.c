@@ -11,6 +11,7 @@
 #include "filesys/directory.h"
 #include "filesys/file.h"
 #include "filesys/filesys.h"
+#include "filesys/inode.h"
 #include "threads/flags.h"
 #include "threads/init.h"
 #include "threads/interrupt.h"
@@ -539,11 +540,20 @@ load_segment (struct file *file, off_t ofs, uint8_t *upage,
       size_t page_read_bytes = read_bytes < PGSIZE ? read_bytes : PGSIZE;
       size_t page_zero_bytes = PGSIZE - page_read_bytes;
 
-      //printf ("[Load segemnt] rb=%d zb=%d writable=%d page=%d\n", page_read_bytes, page_zero_bytes, writable, upage); 
+      //block_sector_t sector_idx = inode_get_inumber (file_get_inode (file), load_ofs);
+      off_t block_id = -1;
+
+      /* If we have a read-only segment obtain its corresponding block sector 
+         to be used later on in sharing read-only frames. */
+      if (writable == false)
+        block_id = inode_get_block_number (file_get_inode (file), load_ofs);
+
+      //printf ("[Load segemnt] rb=%d zb=%d writable=%d page=%d\n", page_read_bytes, page_zero_bytes, writable, upage);
+      //printf ("Inode: %d Ofs %d\n", block_id, load_ofs);
 
       struct vm_page *page = NULL;
       page = vm_new_file_page (upage, file, load_ofs, page_read_bytes, 
-                                page_zero_bytes, writable);
+                                page_zero_bytes, writable, block_id);
       if (page == NULL)
         return false;
 
