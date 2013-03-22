@@ -281,8 +281,8 @@ vm_free_page (struct vm_page *page)
 }
 
 /* Use a heuristic to check for stack access. We check if the
-   address is valid and in the user space and the fault access
-   is at most 32 bytes below the stack pointer. */
+   address is in the user space and the fault access is at 
+   most 32 bytes below the stack pointer. */
 bool
 stack_access (const void *esp, void *addr)
 {

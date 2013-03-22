@@ -68,7 +68,10 @@ vm_lookup_frame (off_t block_id)
 
       /* Takes a page to see if the frame contains the same data block. */
       if (page->type == FILE && page->file_data.block_id == block_id)
-        addr = vf->addr;
+        {
+          addr = vf->addr;
+          vf->pinned = true;
+        }
 
       lock_release (&vf->list_lock);
     }
@@ -254,7 +257,7 @@ eviction_scan_and_flip (struct vm_frame *vf)
 }
 
 /* The Clock page replacement algorithm. We keep a circular list
-   where a hadn points to the oldest page. When a page fault occurs
+   where a hand points to the oldest page. When a page fault occurs
    we look at the accessed bit. If it's 1 we set it to 0 and move on.
    This approach has better performance than the second chance 
    algorithm. For further reference and a more complete explication 
